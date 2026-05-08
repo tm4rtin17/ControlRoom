@@ -29,3 +29,7 @@ web/dist/*
 # Stray credential material
 *.pem
 *.key
+*.crt
+
+# Local Claude Code config / agent definitions — do not publish
+.claude/
