@@ -1,0 +1,99 @@
+# goreleaser config for ControlRoom.
+#
+# Builds linux/amd64 + linux/arm64 binaries with the Vite SPA pre-built and
+# embedded. Run `make web` (or set up the prepare hook below) before running
+# `goreleaser release` so the embed.FS pickup includes a real index.html.
+
+version: 2
+
+project_name: controlroom
+
+before:
+  hooks:
+    - sh -c "cd web && (test -f package-lock.json && npm ci || npm install) && npm run build"
+    - go mod tidy
+
+builds:
+  - id: controlroom
+    main: ./cmd/controlroom
+    binary: controlroom
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/tm4rtin17/controlroom/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/tm4rtin17/controlroom/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -X github.com/tm4rtin17/controlroom/internal/buildinfo.Date={{ .Date }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: tar
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - LICENSE*
+      - README.md
+      - SPEC.md
+      - docs/INSTALL.md
+      - docs/SECURITY.md
+      - deploy/controlroom.service
+      - deploy/controlroom.sudoers
+      - deploy/install.sh
+
+checksum:
+  name_template: "checksums.txt"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/tm4rtin17/controlroom:{{ .Version }}-amd64"
+      - "ghcr.io/tm4rtin17/controlroom:latest-amd64"
+    dockerfile: deploy/Dockerfile
+    use: buildx
+    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=COMMIT={{ .ShortCommit }}"
+      - "--build-arg=DATE={{ .Date }}"
+  - image_templates:
+      - "ghcr.io/tm4rtin17/controlroom:{{ .Version }}-arm64"
+      - "ghcr.io/tm4rtin17/controlroom:latest-arm64"
+    dockerfile: deploy/Dockerfile
+    use: buildx
+    goarch: arm64
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=COMMIT={{ .ShortCommit }}"
+      - "--build-arg=DATE={{ .Date }}"
+
+docker_manifests:
+  - name_template: ghcr.io/tm4rtin17/controlroom:{{ .Version }}
+    image_templates:
+      - ghcr.io/tm4rtin17/controlroom:{{ .Version }}-amd64
+      - ghcr.io/tm4rtin17/controlroom:{{ .Version }}-arm64
+  - name_template: ghcr.io/tm4rtin17/controlroom:latest
+    image_templates:
+      - ghcr.io/tm4rtin17/controlroom:latest-amd64
+      - ghcr.io/tm4rtin17/controlroom:latest-arm64
+
+release:
+  github:
+    owner: tm4rtin17
+    name: ControlRoom
+  draft: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - Merge pull request

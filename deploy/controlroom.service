@@ -1,0 +1,43 @@
+[Unit]
+Description=ControlRoom — homelab dashboard
+Documentation=https://github.com/tm4rtin17/ControlRoom
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=controlroom
+Group=controlroom
+EnvironmentFile=-/etc/controlroom/controlroom.env
+WorkingDirectory=/var/lib/controlroom
+ExecStart=/opt/controlroom/controlroom
+Restart=on-failure
+RestartSec=5
+
+# --- Privilege scoping ----------------------------------------------------
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/controlroom
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# --- Supplementary access ------------------------------------------------
+# adm: read /var/log and the journal.
+# docker: talk to /var/run/docker.sock when present.
+SupplementaryGroups=adm docker
+
+[Install]
+WantedBy=multi-user.target

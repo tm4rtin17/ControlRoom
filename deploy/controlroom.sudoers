@@ -1,0 +1,31 @@
+# /etc/sudoers.d/controlroom
+#
+# Tight sudoers fragment for the ControlRoom service user. Run `visudo -c` after
+# editing — install.sh does this automatically before installing.
+#
+# We only NOPASSWD the exact commands ControlRoom needs:
+#   - apt-get update + apt-get -y --force-confold upgrade
+#   - systemctl reboot
+#   - the ufw subset used by /api/network/firewall/*
+#
+# Anything else still requires the operator to authenticate via the terminal,
+# preserving least privilege.
+
+Cmnd_Alias CR_APT = /usr/bin/apt-get update, \
+                    /usr/bin/apt-get -y -o Dpkg\:\:Options\:\:=--force-confold upgrade
+
+Cmnd_Alias CR_REBOOT = /bin/systemctl reboot, \
+                       /usr/bin/systemctl reboot
+
+Cmnd_Alias CR_UFW = /usr/sbin/ufw status numbered, \
+                    /usr/sbin/ufw allow *, \
+                    /usr/sbin/ufw deny *, \
+                    /usr/sbin/ufw reject *, \
+                    /usr/sbin/ufw limit *, \
+                    /usr/sbin/ufw --force delete *, \
+                    /usr/sbin/ufw --force enable, \
+                    /usr/sbin/ufw disable
+
+controlroom ALL=(root) NOPASSWD: CR_APT, CR_REBOOT, CR_UFW
+Defaults:controlroom !requiretty
+Defaults:controlroom env_keep += "DEBIAN_FRONTEND LC_ALL"

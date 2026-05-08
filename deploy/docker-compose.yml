@@ -1,0 +1,32 @@
+# ControlRoom — minimal compose file.
+#
+# Notes for container deployment:
+#   - systemd dbus and journalctl are not available inside the container,
+#     so /api/services and /api/logs return 503. Use the bare-metal install
+#     (deploy/install.sh) if you need those.
+#   - Mount the Docker socket read-only to manage other containers.
+#   - For Let's Encrypt: set CR_TLS_MODE=acme + CR_ACME_HOST + CR_ACME_EMAIL,
+#     and expose port 80 below for the HTTP-01 challenge.
+
+services:
+  controlroom:
+    image: ghcr.io/tm4rtin17/controlroom:latest
+    container_name: controlroom
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+      # Uncomment when CR_TLS_MODE=acme to serve HTTP-01 challenges:
+      # - "80:80"
+    volumes:
+      - controlroom-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CR_TLS_MODE: selfsigned
+      # CR_TLS_MODE: acme
+      # CR_ACME_HOST: ctrl.example.com
+      # CR_ACME_EMAIL: admin@example.com
+      # CR_VERSION_CHECK: "true"
+      # CR_TRUST_PROXY: "true"   # set when behind a reverse proxy
+
+volumes:
+  controlroom-data:
