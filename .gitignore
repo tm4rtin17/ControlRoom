@@ -1,0 +1,31 @@
+# Go build artifacts
+/controlroom
+/.air/
+*.test
+*.out
+coverage.out
+
+# Frontend
+web/node_modules/
+web/.vite/
+# Embedded SPA: keep the placeholder, ignore real build output
+web/dist/*
+!web/dist/index.html
+
+# Local data dir (TLS keys, SQLite, etc.) — never commit
+/data/
+/var/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Stray credential material
+*.pem
+*.key

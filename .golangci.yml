@@ -1,0 +1,40 @@
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - revive
+    - gosec
+    - misspell
+    - bodyclose
+    - errorlint
+    - nolintlint
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/tm4rtin17/controlroom
+  revive:
+    rules:
+      - name: exported
+        arguments: ["disableStutteringCheck"]
+
+issues:
+  exclude-dirs:
+    - web
+    - deploy
+    - docs
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
