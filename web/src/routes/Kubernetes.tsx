@@ -11,6 +11,10 @@ import { NodeList } from '@/components/k8s/NodeList'
 import { WorkloadList } from '@/components/k8s/WorkloadList'
 import { PodList } from '@/components/k8s/PodList'
 import { ServiceList } from '@/components/k8s/ServiceList'
+import { NodeDetail } from '@/components/k8s/NodeDetail'
+import { WorkloadDetail } from '@/components/k8s/WorkloadDetail'
+import { PodDetail } from '@/components/k8s/PodDetail'
+import { ServiceDetail } from '@/components/k8s/ServiceDetail'
 
 type Tab = 'nodes' | 'workloads' | 'pods' | 'services'
 
@@ -21,10 +25,20 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'services', label: 'Services' },
 ]
 
+interface NodeOpen { name: string }
+interface WorkloadOpen { namespace: string; kind: string; name: string }
+interface PodOpen { namespace: string; name: string }
+interface ServiceOpen { namespace: string; name: string }
+
 export function Kubernetes() {
   const [tab, setTab] = useState<Tab>('nodes')
   const [namespace, setNamespace] = useState('')
   const [search, setSearch] = useState('')
+
+  const [openNode, setOpenNode] = useState<NodeOpen | null>(null)
+  const [openWorkload, setOpenWorkload] = useState<WorkloadOpen | null>(null)
+  const [openPod, setOpenPod] = useState<PodOpen | null>(null)
+  const [openService, setOpenService] = useState<ServiceOpen | null>(null)
 
   const namespacesQ = useK8sNamespaces()
   const nodesQ = useK8sNodes()
@@ -109,6 +123,7 @@ export function Kubernetes() {
           loading={nodesQ.isLoading}
           error={nodesQ.error}
           search={search}
+          onOpen={(name) => setOpenNode({ name })}
         />
       )}
       {tab === 'workloads' && (
@@ -117,6 +132,7 @@ export function Kubernetes() {
           loading={workloadsQ.isLoading}
           error={workloadsQ.error}
           search={search}
+          onOpen={(ns, kind, name) => setOpenWorkload({ namespace: ns, kind, name })}
         />
       )}
       {tab === 'pods' && (
@@ -125,6 +141,7 @@ export function Kubernetes() {
           loading={podsQ.isLoading}
           error={podsQ.error}
           search={search}
+          onOpen={(ns, name) => setOpenPod({ namespace: ns, name })}
         />
       )}
       {tab === 'services' && (
@@ -133,8 +150,35 @@ export function Kubernetes() {
           loading={servicesQ.isLoading}
           error={servicesQ.error}
           search={search}
+          onOpen={(ns, name) => setOpenService({ namespace: ns, name })}
         />
       )}
+
+      {/* Detail drawers — rendered outside tab content so state persists across tab switches */}
+      <NodeDetail
+        name={openNode?.name ?? null}
+        open={!!openNode}
+        onOpenChange={(o) => { if (!o) setOpenNode(null) }}
+      />
+      <WorkloadDetail
+        namespace={openWorkload?.namespace ?? null}
+        kind={openWorkload?.kind ?? null}
+        name={openWorkload?.name ?? null}
+        open={!!openWorkload}
+        onOpenChange={(o) => { if (!o) setOpenWorkload(null) }}
+      />
+      <PodDetail
+        namespace={openPod?.namespace ?? null}
+        name={openPod?.name ?? null}
+        open={!!openPod}
+        onOpenChange={(o) => { if (!o) setOpenPod(null) }}
+      />
+      <ServiceDetail
+        namespace={openService?.namespace ?? null}
+        name={openService?.name ?? null}
+        open={!!openService}
+        onOpenChange={(o) => { if (!o) setOpenService(null) }}
+      />
     </div>
   )
 }

@@ -10,6 +10,7 @@ interface Props {
   loading: boolean
   error: Error | null
   search: string
+  onOpen?: (namespace: string, kind: string, name: string) => void
 }
 
 const KIND_ORDER: K8sWorkload['kind'][] = ['Deployment', 'StatefulSet', 'DaemonSet']
@@ -20,7 +21,7 @@ const KIND_VARIANT: Record<K8sWorkload['kind'], 'default' | 'warn' | 'muted'> = 
   DaemonSet: 'muted',
 }
 
-export function WorkloadList({ workloads, loading, error, search }: Props) {
+export function WorkloadList({ workloads, loading, error, search, onOpen }: Props) {
   if (loading) {
     return (
       <Card>
@@ -86,7 +87,7 @@ export function WorkloadList({ workloads, loading, error, search }: Props) {
                       const pct = w.ready.desired > 0 ? (w.ready.current / w.ready.desired) * 100 : 0
                       const healthy = w.ready.current >= w.ready.desired
                       return (
-                        <tr key={`${w.namespace}/${w.name}`} className="hover:bg-accent/30">
+                        <tr key={`${w.namespace}/${w.name}`} className={onOpen ? 'cursor-pointer hover:bg-accent/30' : 'hover:bg-accent/30'} onClick={() => onOpen?.(w.namespace, w.kind, w.name)}>
                           <td className="px-4 py-3 font-mono text-xs font-medium">{w.name}</td>
                           <td className="px-4 py-3 text-xs text-muted-foreground">{w.namespace}</td>
                           <td className="px-4 py-3">

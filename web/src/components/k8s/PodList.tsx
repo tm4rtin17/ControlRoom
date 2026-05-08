@@ -10,9 +10,10 @@ interface Props {
   loading: boolean
   error: Error | null
   search: string
+  onOpen?: (namespace: string, name: string) => void
 }
 
-export function PodList({ pods, loading, error, search }: Props) {
+export function PodList({ pods, loading, error, search, onOpen }: Props) {
   if (loading) {
     return (
       <Card>
@@ -65,7 +66,7 @@ export function PodList({ pods, loading, error, search }: Props) {
             </thead>
             <tbody className="divide-y">
               {filtered.map((pod) => (
-                <tr key={`${pod.namespace}/${pod.name}`} className="hover:bg-accent/30">
+                <tr key={`${pod.namespace}/${pod.name}`} className={onOpen ? 'cursor-pointer hover:bg-accent/30' : 'hover:bg-accent/30'} onClick={() => onOpen?.(pod.namespace, pod.name)}>
                   <td className="px-4 py-3 font-mono text-xs font-medium">{pod.name}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{pod.namespace}</td>
                   <td className="px-4 py-3">

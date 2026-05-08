@@ -2,6 +2,78 @@ import { useQuery } from '@tanstack/react-query'
 
 import { apiFetch } from './api'
 
+export interface K8sCondition {
+  type: string
+  status: 'True' | 'False' | 'Unknown'
+  reason: string
+  message: string
+  last_transition_time: string
+}
+
+export interface K8sEvent {
+  type: 'Normal' | 'Warning'
+  reason: string
+  message: string
+  source: string
+  count: number
+  first: string
+  last: string
+}
+
+export interface K8sTaint {
+  key: string
+  value: string
+  effect: string
+}
+
+export interface K8sContainerStatus {
+  name: string
+  image: string
+  ready: boolean
+  restart_count: number
+  state: 'running' | 'waiting' | 'terminated' | string
+  reason: string
+  started: string
+}
+
+export interface K8sEndpointAddr {
+  ip: string
+  node_name: string
+  ready: boolean
+}
+
+export interface K8sNodeDetail {
+  node: K8sNode
+  conditions: K8sCondition[]
+  allocatable: { cpu: string; memory: string; pods: string }
+  taints: K8sTaint[]
+  events: K8sEvent[]
+}
+
+export interface K8sWorkloadDetail {
+  workload: K8sWorkload
+  conditions: K8sCondition[]
+  selector: Record<string, string>
+  strategy: string
+  events: K8sEvent[]
+}
+
+export interface K8sPodDetail {
+  pod: K8sPod
+  conditions: K8sCondition[]
+  containers: K8sContainerStatus[]
+  node_name: string
+  qos_class: string
+  events: K8sEvent[]
+}
+
+export interface K8sServiceDetail {
+  service: K8sService
+  endpoints: K8sEndpointAddr[]
+  selector: Record<string, string>
+  events: K8sEvent[]
+}
+
 export interface K8sNode {
   name: string
   status: 'Ready' | 'NotReady' | 'Unknown'
@@ -104,4 +176,52 @@ export function useK8sServices(namespace: string) {
     refetchInterval: 10_000,
     staleTime: 2_000,
   })
+}
+
+export function useK8sNodeDetail(name: string | null) {
+  return useQuery({
+    queryKey: ['k8s', 'nodes', name, 'detail'],
+    queryFn: () => apiFetch<K8sNodeDetail>(`/api/k8s/nodes/${encodeURIComponent(name!)}`),
+    enabled: !!name,
+    refetchInterval: 10_000,
+  })
+}
+
+export function useK8sWorkloadDetail(namespace: string | null, kind: string | null, name: string | null) {
+  return useQuery({
+    queryKey: ['k8s', 'workloads', namespace, kind, name, 'detail'],
+    queryFn: () =>
+      apiFetch<K8sWorkloadDetail>(
+        `/api/k8s/workloads/${encodeURIComponent(namespace!)}/${encodeURIComponent(kind!.toLowerCase())}/${encodeURIComponent(name!)}`
+      ),
+    enabled: !!(namespace && kind && name),
+    refetchInterval: 10_000,
+  })
+}
+
+export function useK8sPodDetail(namespace: string | null, name: string | null) {
+  return useQuery({
+    queryKey: ['k8s', 'pods', namespace, name, 'detail'],
+    queryFn: () =>
+      apiFetch<K8sPodDetail>(`/api/k8s/pods/${encodeURIComponent(namespace!)}/${encodeURIComponent(name!)}`),
+    enabled: !!(namespace && name),
+    refetchInterval: 10_000,
+  })
+}
+
+export function useK8sServiceDetail(namespace: string | null, name: string | null) {
+  return useQuery({
+    queryKey: ['k8s', 'services', namespace, name, 'detail'],
+    queryFn: () =>
+      apiFetch<K8sServiceDetail>(
+        `/api/k8s/services/${encodeURIComponent(namespace!)}/${encodeURIComponent(name!)}`
+      ),
+    enabled: !!(namespace && name),
+    refetchInterval: 10_000,
+  })
+}
+
+export function podLogsURL(namespace: string, name: string, container: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}/ws/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?container=${encodeURIComponent(container)}&tail=200`
 }

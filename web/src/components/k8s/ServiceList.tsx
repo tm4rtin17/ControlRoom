@@ -9,6 +9,7 @@ interface Props {
   loading: boolean
   error: Error | null
   search: string
+  onOpen?: (namespace: string, name: string) => void
 }
 
 function formatPorts(svc: K8sService): string {
@@ -18,7 +19,7 @@ function formatPorts(svc: K8sService): string {
     .join(', ')
 }
 
-export function ServiceList({ services, loading, error, search }: Props) {
+export function ServiceList({ services, loading, error, search, onOpen }: Props) {
   if (loading) {
     return (
       <Card>
@@ -71,7 +72,7 @@ export function ServiceList({ services, loading, error, search }: Props) {
             </thead>
             <tbody className="divide-y">
               {filtered.map((svc) => (
-                <tr key={`${svc.namespace}/${svc.name}`} className="hover:bg-accent/30">
+                <tr key={`${svc.namespace}/${svc.name}`} className={onOpen ? 'cursor-pointer hover:bg-accent/30' : 'hover:bg-accent/30'} onClick={() => onOpen?.(svc.namespace, svc.name)}>
                   <td className="px-4 py-3 font-mono text-xs font-medium">{svc.name}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{svc.namespace}</td>
                   <td className="px-4 py-3">

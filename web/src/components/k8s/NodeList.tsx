@@ -10,9 +10,10 @@ interface Props {
   loading: boolean
   error: Error | null
   search: string
+  onOpen?: (name: string) => void
 }
 
-export function NodeList({ nodes, loading, error, search }: Props) {
+export function NodeList({ nodes, loading, error, search, onOpen }: Props) {
   if (loading) {
     return (
       <Card>
@@ -63,7 +64,7 @@ export function NodeList({ nodes, loading, error, search }: Props) {
               {filtered.map((node) => {
                 const internalIP = node.addresses.find((a) => a.type === 'InternalIP')?.address ?? '—'
                 return (
-                  <tr key={node.name} className="hover:bg-accent/30">
+                  <tr key={node.name} className={onOpen ? 'cursor-pointer hover:bg-accent/30' : 'hover:bg-accent/30'} onClick={() => onOpen?.(node.name)}>
                     <td className="px-4 py-3 font-mono text-xs font-medium">{node.name}</td>
                     <td className="px-4 py-3">
                       <K8sNodeStatusPill status={node.status} />

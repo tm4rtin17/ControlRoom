@@ -140,6 +140,7 @@ func NewRouter(d Deps) *fiber.App {
 	terminalapi.MountWS(wsGroup, terminalapi.Deps{DB: d.DB, Logger: d.Logger})
 	updatesapi.MountWS(wsGroup, updatesDeps)
 	logsapi.MountWS(wsGroup, logsapi.Deps{Logger: d.Logger})
+	k8sapi.MountWS(wsGroup, k8sapi.Deps{Client: d.K8s, Logger: d.Logger})
 
 	wsGroup.All("/*", notFound)
 
