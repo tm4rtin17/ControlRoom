@@ -41,6 +41,11 @@ function isPubliclyAccessed(host: string): boolean {
     const second = parseInt(host.split('.')[1] ?? '', 10)
     if (second >= 16 && second <= 31) return false
   }
+  // Tailscale / RFC 6598 CGNAT — 100.64.0.0/10.
+  if (host.startsWith('100.')) {
+    const second = parseInt(host.split('.')[1] ?? '', 10)
+    if (second >= 64 && second <= 127) return false
+  }
 
   // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
   const lower = host.toLowerCase()

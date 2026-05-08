@@ -62,12 +62,19 @@ type queryResp struct {
 }
 
 func (d Deps) queryHandler(c *fiber.Ctx) error {
+	if !logs.Available() {
+		return fiber.NewError(http.StatusServiceUnavailable, journalUnavailableMsg)
+	}
 	entries, err := logs.Query(c.Context(), filterFromQuery(c))
 	if err != nil {
 		return fiber.NewError(http.StatusInternalServerError, "journal query: "+err.Error())
 	}
 	return c.JSON(queryResp{Entries: entries})
 }
+
+// journalUnavailableMsg is shown to the operator when journalctl can't be
+// invoked (e.g. distroless container). The SPA surfaces it verbatim.
+const journalUnavailableMsg = "journal logs unavailable on this host (journalctl not found) — switch to Containers or run ControlRoom on bare metal"
 
 // ---- live tail ----
 
@@ -89,6 +96,11 @@ func queryFromConn(c *websocket.Conn) logs.Filter {
 
 func (d Deps) tailWS(c *websocket.Conn) {
 	defer func() { _ = c.Close() }()
+
+	if !logs.Available() {
+		_ = c.WriteJSON(fiber.Map{"type": "error", "err": journalUnavailableMsg})
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

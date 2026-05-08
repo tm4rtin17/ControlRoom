@@ -33,6 +33,7 @@ import (
 	"github.com/tm4rtin17/controlroom/internal/config"
 	"github.com/tm4rtin17/controlroom/internal/docker"
 	"github.com/tm4rtin17/controlroom/internal/jobs"
+	"github.com/tm4rtin17/controlroom/internal/logs"
 	"github.com/tm4rtin17/controlroom/internal/store"
 	"github.com/tm4rtin17/controlroom/internal/systemd"
 )
@@ -89,6 +90,9 @@ func run() error {
 	sysd, sysdErr := systemd.NewDBus(context.Background())
 	if sysdErr != nil {
 		logger.Warn().Err(sysdErr).Msg("systemd unavailable; /api/services disabled")
+	}
+	if !logs.Available() {
+		logger.Warn().Msg("journalctl not in PATH; /api/logs/journal will return 503")
 	}
 	if sysd != nil {
 		defer func() { _ = sysd.Close() }()

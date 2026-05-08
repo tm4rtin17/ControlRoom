@@ -1,10 +1,13 @@
 # ControlRoom — minimal compose file.
 #
 # Notes for container deployment:
-#   - systemd dbus and journalctl are not available inside the container,
-#     so /api/services and /api/logs return 503. Use the bare-metal install
-#     (deploy/install.sh) if you need those.
-#   - Mount the Docker socket read-only to manage other containers.
+#   - systemd dbus and journalctl are not available inside the container, so
+#     /api/services and /api/logs/journal return 503. The Logs page falls
+#     back to streaming docker container logs; install bare metal
+#     (deploy/install.sh) if you also need journal logs.
+#   - The Docker socket is mounted read-only. The container runs as nonroot
+#     (uid 65532), so we add the host's docker group via group_add — set
+#     DOCKER_GID to your host's docker group GID (`getent group docker`).
 #   - For Let's Encrypt: set CR_TLS_MODE=acme + CR_ACME_HOST + CR_ACME_EMAIL,
 #     and expose port 80 below for the HTTP-01 challenge.
 
@@ -13,6 +16,9 @@ services:
     image: ghcr.io/tm4rtin17/controlroom:latest
     container_name: controlroom
     restart: unless-stopped
+    # Grant access to /var/run/docker.sock for the nonroot user.
+    group_add:
+      - "${DOCKER_GID:-999}"
     ports:
       - "8443:8443"
       # Uncomment when CR_TLS_MODE=acme to serve HTTP-01 challenges:
