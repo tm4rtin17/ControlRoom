@@ -77,6 +77,7 @@ export interface SystemCapabilities {
   systemd: boolean
   docker: boolean
   journal: boolean
+  kubernetes: boolean
 }
 
 export function useCapabilities() {

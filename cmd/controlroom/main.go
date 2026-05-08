@@ -33,6 +33,7 @@ import (
 	"github.com/tm4rtin17/controlroom/internal/config"
 	"github.com/tm4rtin17/controlroom/internal/docker"
 	"github.com/tm4rtin17/controlroom/internal/jobs"
+	"github.com/tm4rtin17/controlroom/internal/k8s"
 	"github.com/tm4rtin17/controlroom/internal/logs"
 	"github.com/tm4rtin17/controlroom/internal/store"
 	"github.com/tm4rtin17/controlroom/internal/systemd"
@@ -113,6 +114,14 @@ func run() error {
 		defer func() { _ = dock.Close() }()
 	}
 
+	// Kubernetes is best-effort: in-cluster auth first, kubeconfig fallback.
+	// When ControlRoom is not deployed inside a cluster and no kubeconfig is
+	// reachable, /api/k8s returns 503 and the SPA hides the Kubernetes tab.
+	k8sClient, k8sErr := k8s.New(context.Background())
+	if k8sErr != nil {
+		logger.Warn().Err(k8sErr).Msg("kubernetes unavailable; /api/k8s disabled")
+	}
+
 	deps := api.Deps{
 		Cfg:         cfg,
 		Logger:      logger,
@@ -125,6 +134,7 @@ func run() error {
 		Aggregator:  collectors.NewAggregator(),
 		SystemD:     systemdOrNil(sysd),
 		Docker:      dockerOrNil(dock),
+		K8s:         k8sClient,
 		Jobs:        jobs.NewRunner(),
 	}
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/tm4rtin17/controlroom/internal/collectors"
 	"github.com/tm4rtin17/controlroom/internal/docker"
+	"github.com/tm4rtin17/controlroom/internal/k8s"
 	"github.com/tm4rtin17/controlroom/internal/logs"
 	"github.com/tm4rtin17/controlroom/internal/systemd"
 )
@@ -22,11 +23,12 @@ import (
 type Deps struct {
 	Aggregator *collectors.Aggregator
 	Logger     zerolog.Logger
-	// SystemD and Docker are nil-or-set; mirror the same wiring used by the
-	// services / containers handlers so /api/system/capabilities can report
-	// which features the SPA should expose.
+	// SystemD, Docker, and K8s are nil-or-set; mirror the same wiring used by
+	// the services / containers / k8s handlers so /api/system/capabilities can
+	// report which features the SPA should expose.
 	SystemD systemd.Client
 	Docker  docker.Client
+	K8s     *k8s.Client
 }
 
 // MountHTTP registers the REST endpoint. Caller is responsible for applying
@@ -41,16 +43,18 @@ func MountHTTP(authed fiber.Router, d Deps) {
 // on this host. The frontend uses it to hide nav entries that would otherwise
 // dead-end with a 503 (e.g. the Services tab in container deployments).
 type capabilitiesResp struct {
-	Systemd bool `json:"systemd"`
-	Docker  bool `json:"docker"`
-	Journal bool `json:"journal"`
+	Systemd    bool `json:"systemd"`
+	Docker     bool `json:"docker"`
+	Journal    bool `json:"journal"`
+	Kubernetes bool `json:"kubernetes"`
 }
 
 func (d Deps) capabilitiesHandler(c *fiber.Ctx) error {
 	return c.JSON(capabilitiesResp{
-		Systemd: d.SystemD != nil,
-		Docker:  d.Docker != nil,
-		Journal: logs.Available(),
+		Systemd:    d.SystemD != nil,
+		Docker:     d.Docker != nil,
+		Journal:    logs.Available(),
+		Kubernetes: d.K8s != nil,
 	})
 }
 

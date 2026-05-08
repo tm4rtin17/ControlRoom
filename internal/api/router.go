@@ -12,6 +12,7 @@ import (
 
 	authapi "github.com/tm4rtin17/controlroom/internal/api/auth"
 	containersapi "github.com/tm4rtin17/controlroom/internal/api/containers"
+	k8sapi "github.com/tm4rtin17/controlroom/internal/api/k8s"
 	logsapi "github.com/tm4rtin17/controlroom/internal/api/logs"
 	"github.com/tm4rtin17/controlroom/internal/api/middleware"
 	networkapi "github.com/tm4rtin17/controlroom/internal/api/network"
@@ -27,6 +28,7 @@ import (
 	"github.com/tm4rtin17/controlroom/internal/config"
 	"github.com/tm4rtin17/controlroom/internal/docker"
 	"github.com/tm4rtin17/controlroom/internal/jobs"
+	"github.com/tm4rtin17/controlroom/internal/k8s"
 	"github.com/tm4rtin17/controlroom/internal/store"
 	"github.com/tm4rtin17/controlroom/internal/systemd"
 	"github.com/tm4rtin17/controlroom/internal/web"
@@ -45,6 +47,7 @@ type Deps struct {
 	Aggregator  *collectors.Aggregator
 	SystemD     systemd.Client // nil → /api/services returns 503
 	Docker      docker.Client  // nil → /api/containers returns 503
+	K8s         *k8s.Client    // nil → /api/k8s returns 503
 	Jobs        *jobs.Runner
 }
 
@@ -103,6 +106,7 @@ func NewRouter(d Deps) *fiber.App {
 		Logger:     d.Logger,
 		SystemD:    d.SystemD,
 		Docker:     d.Docker,
+		K8s:        d.K8s,
 	}
 	systemapi.MountHTTP(guarded, systemDeps)
 
@@ -118,6 +122,7 @@ func NewRouter(d Deps) *fiber.App {
 
 	networkapi.MountHTTP(guarded, networkapi.Deps{DB: d.DB, Logger: d.Logger})
 	logsapi.MountHTTP(guarded, logsapi.Deps{Logger: d.Logger})
+	k8sapi.MountHTTP(guarded, k8sapi.Deps{Client: d.K8s, Logger: d.Logger})
 	settingsapi.MountHTTP(guarded, settingsapi.Deps{Cfg: d.Cfg, DB: d.DB})
 
 	// Catch-all 404 for unknown /api paths.
