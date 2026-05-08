@@ -98,7 +98,12 @@ func NewRouter(d Deps) *fiber.App {
 	)
 	authapi.MountAuthenticated(guarded, authDeps)
 
-	systemDeps := systemapi.Deps{Aggregator: d.Aggregator, Logger: d.Logger}
+	systemDeps := systemapi.Deps{
+		Aggregator: d.Aggregator,
+		Logger:     d.Logger,
+		SystemD:    d.SystemD,
+		Docker:     d.Docker,
+	}
 	systemapi.MountHTTP(guarded, systemDeps)
 
 	servicesDeps := servicesapi.Deps{Client: d.SystemD, DB: d.DB, Logger: d.Logger}
