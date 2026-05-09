@@ -140,6 +140,22 @@ export interface K8sConfigMapDetail {
   events: K8sEvent[]
 }
 
+export interface K8sSecret {
+  name: string
+  namespace: string
+  type: string
+  keys: string[]
+  age: string
+}
+
+export interface K8sSecretDetail {
+  secret: K8sSecret
+  labels: Record<string, string>
+  annotations: Record<string, string>
+  data: Record<string, string>
+  events: K8sEvent[]
+}
+
 export function useK8sNodes() {
   return useQuery({
     queryKey: ['k8s', 'nodes'],
@@ -258,6 +274,32 @@ export function useK8sConfigMapDetail(namespace: string | null, name: string | n
       ),
     enabled: !!(namespace && name),
     refetchInterval: 10_000,
+  })
+}
+
+export function useK8sSecrets(namespace: string) {
+  return useQuery({
+    queryKey: ['k8s', 'secrets', namespace],
+    queryFn: () =>
+      apiFetch<{ secrets: K8sSecret[] }>(
+        `/api/k8s/secrets${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`
+      ),
+    refetchInterval: 30_000,
+    staleTime: 5_000,
+  })
+}
+
+export function useK8sSecretDetail(namespace: string | null, name: string | null) {
+  return useQuery({
+    queryKey: ['k8s', 'secret', 'detail', namespace, name],
+    queryFn: () =>
+      apiFetch<K8sSecretDetail>(
+        `/api/k8s/secrets/${encodeURIComponent(namespace!)}/${encodeURIComponent(name!)}`
+      ),
+    enabled: !!(namespace && name),
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+    refetchInterval: false,
   })
 }
 

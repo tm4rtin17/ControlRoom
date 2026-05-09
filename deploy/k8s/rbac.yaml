@@ -51,6 +51,14 @@ rules:
     resources:
       - configmaps
     verbs: [update]
+  # Secrets read access. Deliberately get/list only — NOT watch — so we
+  # don't keep a long-lived stream of all cluster secret values open.
+  # Every detail view writes an audit row (k8s.secret.read) so the
+  # operator's read history is recoverable.
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs: [get, list]
   - apiGroups: ["apps"]
     resources:
       - deployments

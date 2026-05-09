@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Search } from 'lucide-react'
 
 import { ApiError } from '@/lib/api'
-import { useK8sNodes, useK8sNamespaces, useK8sWorkloads, useK8sPods, useK8sServices, useK8sConfigMaps } from '@/lib/k8s'
+import { useK8sNodes, useK8sNamespaces, useK8sWorkloads, useK8sPods, useK8sServices, useK8sConfigMaps, useK8sSecrets } from '@/lib/k8s'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -17,8 +17,10 @@ import { WorkloadDetail } from '@/components/k8s/WorkloadDetail'
 import { PodDetail } from '@/components/k8s/PodDetail'
 import { ServiceDetail } from '@/components/k8s/ServiceDetail'
 import { ConfigMapDetail } from '@/components/k8s/ConfigMapDetail'
+import { SecretList } from '@/components/k8s/SecretList'
+import { SecretDetail } from '@/components/k8s/SecretDetail'
 
-type Tab = 'nodes' | 'workloads' | 'pods' | 'services' | 'configmaps'
+type Tab = 'nodes' | 'workloads' | 'pods' | 'services' | 'configmaps' | 'secrets'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'nodes', label: 'Nodes' },
@@ -26,6 +28,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'pods', label: 'Pods' },
   { id: 'services', label: 'Services' },
   { id: 'configmaps', label: 'ConfigMaps' },
+  { id: 'secrets', label: 'Secrets' },
 ]
 
 interface NodeOpen { name: string }
@@ -33,6 +36,7 @@ interface WorkloadOpen { namespace: string; kind: string; name: string }
 interface PodOpen { namespace: string; name: string }
 interface ServiceOpen { namespace: string; name: string }
 interface ConfigMapOpen { namespace: string; name: string }
+interface SecretOpen { namespace: string; name: string }
 
 export function Kubernetes() {
   const [tab, setTab] = useState<Tab>('nodes')
@@ -44,6 +48,7 @@ export function Kubernetes() {
   const [openPod, setOpenPod] = useState<PodOpen | null>(null)
   const [openService, setOpenService] = useState<ServiceOpen | null>(null)
   const [openConfigMap, setOpenConfigMap] = useState<ConfigMapOpen | null>(null)
+  const [openSecret, setOpenSecret] = useState<SecretOpen | null>(null)
 
   const namespacesQ = useK8sNamespaces()
   const nodesQ = useK8sNodes()
@@ -51,6 +56,7 @@ export function Kubernetes() {
   const podsQ = useK8sPods(namespace)
   const servicesQ = useK8sServices(namespace)
   const configMapsQ = useK8sConfigMaps(namespace)
+  const secretsQ = useK8sSecrets(namespace)
 
   // Surface 503 from the namespaces call as a top-level unavailable state.
   const unavailable = namespacesQ.error instanceof ApiError && namespacesQ.error.status === 503
@@ -168,6 +174,15 @@ export function Kubernetes() {
           onOpen={(ns, name) => setOpenConfigMap({ namespace: ns, name })}
         />
       )}
+      {tab === 'secrets' && (
+        <SecretList
+          secrets={secretsQ.data?.secrets ?? []}
+          loading={secretsQ.isLoading}
+          error={secretsQ.error}
+          search={search}
+          onOpen={(ns, name) => setOpenSecret({ namespace: ns, name })}
+        />
+      )}
 
       {/* Detail drawers — rendered outside tab content so state persists across tab switches */}
       <NodeDetail
@@ -200,6 +215,12 @@ export function Kubernetes() {
         name={openConfigMap?.name ?? null}
         open={!!openConfigMap}
         onOpenChange={(o) => { if (!o) setOpenConfigMap(null) }}
+      />
+      <SecretDetail
+        namespace={openSecret?.namespace ?? null}
+        name={openSecret?.name ?? null}
+        open={!!openSecret}
+        onOpenChange={(o) => { if (!o) setOpenSecret(null) }}
       />
     </div>
   )

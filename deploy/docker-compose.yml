@@ -34,7 +34,7 @@
 
 services:
   controlroom:
-    image: ghcr.io/tm4rtin17/controlroom:latest
+    image: controlroom:dev
     container_name: controlroom
     restart: unless-stopped
 

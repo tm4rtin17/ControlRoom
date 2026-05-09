@@ -76,6 +76,8 @@ func MountHTTP(authed fiber.Router, d Deps) {
 	g.Get("/configmaps", d.listConfigMapsHandler)
 	g.Get("/configmaps/:namespace/:name", d.configMapDetailHandler)
 	g.Put("/configmaps/:namespace/:name", d.updateConfigMapHandler)
+	g.Get("/secrets", d.listSecretsHandler)
+	g.Get("/secrets/:namespace/:name", d.secretDetailHandler)
 }
 
 // MountWS registers WebSocket routes on the ws group.
@@ -361,6 +363,67 @@ func (d Deps) updateConfigMapHandler(c *fiber.Ctx) error {
 	}
 	_ = d.DB.WriteAudit(c.Context(), entry)
 	return c.JSON(fiber.Map{"ok": true})
+}
+
+// ---- secret handlers ----
+
+type secretsResp struct {
+	Secrets []k8s.Secret `json:"secrets"`
+}
+
+func (d Deps) listSecretsHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	ns := c.Query("namespace")
+	if ns != "" && !validK8sName(ns) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	secrets, err := d.Client.ListSecrets(c.Context(), ns)
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, "list secrets: "+err.Error())
+	}
+	return c.JSON(secretsResp{Secrets: secrets})
+}
+
+func (d Deps) secretDetailHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	namespace := c.Params("namespace")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid secret name")
+	}
+
+	detail, err := d.Client.GetSecret(c.Context(), namespace, name)
+	entry := store.AuditEntry{
+		IP:     c.IP(),
+		Action: "k8s.secret.read",
+		Target: namespace + "/" + name,
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{"error": err.Error()}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+		if k8serrors.IsNotFound(err) {
+			return fiber.NewError(http.StatusNotFound, "secret not found")
+		}
+		if k8serrors.IsForbidden(err) {
+			return fiber.NewError(http.StatusForbidden, "forbidden")
+		}
+		return fiber.NewError(http.StatusInternalServerError, "get secret: "+err.Error())
+	}
+	entry.Outcome = "success"
+	entry.Detail = map[string]any{"key_count": len(detail.Secret.Keys)}
+	_ = d.DB.WriteAudit(c.Context(), entry)
+	return c.JSON(detail)
 }
 
 // ---- write action handlers ----
