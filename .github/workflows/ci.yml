@@ -94,4 +94,8 @@ jobs:
             VERSION=ci-${{ github.sha }}
             COMMIT=${{ github.sha }}
       - name: Inspect image size
-        run: docker image inspect controlroom:ci --format '{{ .Size }}' | awk '{ printf "image size: %.1f MB\n", $1/1024/1024 }'
+        # Block scalar — the awk format string contains `: ` (colon
+        # space) which would be parsed as an inline mapping value if
+        # this were a plain `run:` scalar.
+        run: |
+          docker image inspect controlroom:ci --format '{{ .Size }}' | awk '{ printf "image size: %.1f MB\n", $1/1024/1024 }'
