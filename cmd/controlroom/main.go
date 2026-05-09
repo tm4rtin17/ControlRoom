@@ -66,6 +66,7 @@ func run() error {
 		Bool("trust_proxy", cfg.TrustProxy).
 		Bool("dev_mode", cfg.DevMode).
 		Bool("host_shell", cfg.HostShell).
+		Bool("terminal_login", cfg.TerminalLogin).
 		Msg("controlroom starting")
 
 	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {

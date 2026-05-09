@@ -35,6 +35,7 @@ type Config struct {
 	VersionCheck bool
 	DevMode      bool
 	HostShell    bool // CR_HOST_SHELL — wrap terminal in nsenter -t 1 to enter host namespaces
+	TerminalLogin bool // CR_TERMINAL_LOGIN — spawn /bin/login (PAM auth) instead of a bare shell. Requires HostShell.
 }
 
 func Load() (*Config, error) {
@@ -52,6 +53,7 @@ func Load() (*Config, error) {
 		VersionCheck: envBool("CR_VERSION_CHECK", false),
 		DevMode:      envBool("CR_DEV", false),
 		HostShell:    envBool("CR_HOST_SHELL", false),
+		TerminalLogin: envBool("CR_TERMINAL_LOGIN", false),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err

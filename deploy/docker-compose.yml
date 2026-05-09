@@ -94,6 +94,12 @@ services:
       KUBECONFIG: /etc/k3s/kubeconfig
       # Signals pty.go to wrap interactive shells with nsenter -t 1.
       CR_HOST_SHELL: "true"
+      # When true, the terminal spawns /bin/login (PAM auth via the host's
+      # /etc/pam.d/login policy) instead of dropping straight into root's
+      # shell. Mirrors SSH UX: the operator types host credentials in the
+      # xterm and login(1) execs the user's shell at the user's uid only on
+      # success. Strongly recommended whenever CR_HOST_SHELL is true.
+      CR_TERMINAL_LOGIN: "true"
       # CR_TLS_MODE: acme
       # CR_ACME_HOST: ctrl.example.com
       # CR_ACME_EMAIL: admin@example.com

@@ -75,7 +75,19 @@ type Options struct {
 	Cols      int
 	Env       []string // appended to the sanitized base env
 	HostShell bool     // wrap spawned process in nsenter -t 1 -m -u -i -n -p
+	// LoginMode runs /bin/login inside the host namespaces instead of jumping
+	// straight to a shell. The user types their host credentials into the same
+	// xterm; PAM authenticates via the host's policies and only then execs the
+	// user's shell at the user's uid. Requires HostShell.
+	LoginMode bool
 }
+
+// LoginPath is the host's login(1) binary. /bin/login is universal on
+// Debian/RPi/Ubuntu and on usrmerge-style Fedora/Arch. Resolved from the
+// host's mount namespace at exec time, so a stat from the container
+// against this path would be misleading — we rely on exec failing with a
+// clear error if the host is missing it.
+const LoginPath = "/bin/login"
 
 // New starts a shell under a fresh PTY. The returned Session is hot — the
 // caller must Close() it eventually or the child leaks.
@@ -90,15 +102,24 @@ func New(id string, opts Options) (*Session, error) {
 			return nil, errors.New("CR_HOST_SHELL=true but /usr/bin/nsenter not found in image")
 		}
 	}
+	if opts.LoginMode && !opts.HostShell {
+		return nil, errors.New("LoginMode requires HostShell")
+	}
 
 	rows, cols := clampSize(opts.Rows, opts.Cols)
 
 	var cmd *exec.Cmd
-	if opts.HostShell {
+	switch {
+	case opts.HostShell && opts.LoginMode:
+		// Enter all host namespaces, then exec login(1). PAM prompts the user
+		// for host credentials directly in the xterm; on success login execs
+		// the user's shell at the user's uid. The password never touches Go.
+		cmd = exec.Command(NsenterPath, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", LoginPath)
+	case opts.HostShell:
 		// Enter all host namespaces (mount, uts, ipc, net, pid) via PID 1 so
 		// the operator gets a full host shell, not the container's view.
 		cmd = exec.Command(NsenterPath, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", shell, "--login")
-	} else {
+	default:
 		cmd = exec.Command(shell)
 	}
 	cmd.Env = baseEnv(opts.Env, shell)
@@ -214,6 +235,7 @@ func isAllowed(path string) bool {
 	}
 	return false
 }
+
 
 func clampSize(rows, cols int) (int, int) {
 	if rows < 1 {
