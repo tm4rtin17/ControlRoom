@@ -82,17 +82,27 @@ type Options struct {
 	LoginMode bool
 }
 
-// loginScript is what we hand bash via -c when LoginMode is enabled. We
-// don't use util-linux login(1) directly: its modern incarnation refuses
-// to run interactively when execv'd from a regular process (it expects to
-// be slave to getty/sshd, with specific TTY ioctls, and exits silently
-// otherwise). su -l is a regular interactive program that handles PAM
-// password prompts natively, which is exactly the UX we want.
+// loginScript is what we hand bash via -c when LoginMode is enabled.
+//
+// Two non-obvious things going on:
+//
+// 1. We don't use util-linux login(1). Its modern incarnation refuses to
+//    run interactively when execv'd from a regular process (it expects to
+//    be slave to getty/sshd, with specific TTY ioctls, and exits silently
+//    otherwise). su(1) is a regular interactive program — it works.
+//
+// 2. We `setpriv --reuid=nobody` before invoking su. Root invoking su(1)
+//    is special-cased to skip PAM authentication ("root can become
+//    anyone") — without the privilege drop, the operator would get a
+//    shell as the target user without ever proving the password. After
+//    dropping to nobody:nogroup, su(1) runs full PAM auth, /etc/pam.d/su
+//    enforces lockouts and audit, and on success setuid root via the
+//    binary's setuid bit and then drops to the requested user.
 const loginScript = `
 printf '\nControlRoom Terminal — host login at %s\n' "$(hostname)"
 read -rp 'username: ' CR_USER
 [ -z "$CR_USER" ] && { echo 'no username — disconnecting'; exit 1; }
-exec su -l "$CR_USER"
+exec setpriv --reuid=nobody --regid=nogroup --clear-groups -- su -l "$CR_USER"
 `
 
 // New starts a shell under a fresh PTY. The returned Session is hot — the
