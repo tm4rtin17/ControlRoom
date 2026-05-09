@@ -29,7 +29,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: './dist',
     emptyOutDir: true,
     target: 'es2022',
     sourcemap: false,

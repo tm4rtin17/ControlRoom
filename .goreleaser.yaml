@@ -11,7 +11,7 @@ project_name: controlroom
 before:
   hooks:
     - sh -c "cd web && (test -f package-lock.json && npm ci || npm install) && npm run build"
-    - go mod tidy
+    - go mod download
 
 builds:
   - id: controlroom

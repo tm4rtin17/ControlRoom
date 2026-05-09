@@ -25,7 +25,7 @@ dev-api: ## Run Go backend with hot reload (HTTP, dev cookies)
 dev-web: ## Run Vite dev server
 	cd web && (test -d node_modules || npm install) && npm run dev
 
-web: ## Build the frontend bundle into web/dist/
+web: ## Build the frontend bundle into internal/web/dist/
 	cd web && (test -f package-lock.json && npm ci || npm install) && npm run build
 
 build: web ## Build the controlroom binary (writes ./controlroom)
@@ -52,4 +52,4 @@ tidy: ## Tidy go.mod
 clean: ## Remove build artifacts
 	rm -f controlroom
 	rm -rf .air web/node_modules web/.vite
-	find web/dist -mindepth 1 ! -name index.html -exec rm -rf {} + 2>/dev/null || true
+	find internal/web/dist -mindepth 1 ! -name index.html -exec rm -rf {} + 2>/dev/null || true

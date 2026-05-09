@@ -166,7 +166,7 @@ func baseTLSConfig(cert tls.Certificate) *tls.Config {
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		},
 		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
-		NextProtos:       []string{"h2", "http/1.1"},
+		NextProtos:       []string{"http/1.1"},
 	}
 }
 

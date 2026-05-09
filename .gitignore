@@ -11,6 +11,8 @@ web/.vite/
 # Embedded SPA: keep the placeholder, ignore real build output
 web/dist/*
 !web/dist/index.html
+internal/web/dist/*
+!internal/web/dist/index.html
 
 # Local data dir (TLS keys, SQLite, etc.) — never commit
 /data/
