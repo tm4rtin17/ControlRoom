@@ -185,15 +185,6 @@ func (d Deps) meHandler(c *fiber.Ctx) error {
 
 // ---- 2FA management (post-login) ----
 
-// pendingEnrollments holds in-progress TOTP enrollments keyed by user id.
-// Stored only in memory so a restart cancels enrollment in flight; the user
-// just enrolls again. Keeps unverified secrets out of the DB.
-type pendingEnrollments struct {
-	// (TODO: M9 polish — promote to a struct map with TTL eviction. For the
-	// homelab single-user surface, the user id key + verify-then-store flow
-	// is sufficient.)
-}
-
 type totpEnrollResp struct {
 	Secret    string `json:"secret"`
 	URI       string `json:"uri"`
