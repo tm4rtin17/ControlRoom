@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Trash2, Plus, RefreshCw } from 'lucide-react'
 
 import { useK8sConfigMapDetail, useUpdateConfigMap } from '@/lib/k8s'
+import { ManifestEditor } from './ManifestEditor'
 import { ApiError } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
@@ -89,6 +90,7 @@ export function ConfigMapDetail({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [conflictError, setConflictError] = useState(false)
+  const [manifestEditorOpen, setManifestEditorOpen] = useState(false)
 
   const newKeyRefs = useRef<HTMLInputElement[]>([])
 
@@ -212,6 +214,13 @@ export function ConfigMapDetail({
                   title="Reload and discard local edits"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setManifestEditorOpen(true)}
+                >
+                  Edit YAML
                 </Button>
                 <Button
                   size="sm"
@@ -383,6 +392,16 @@ export function ConfigMapDetail({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {namespace && name && (
+        <ManifestEditor
+          kind="configmap"
+          namespace={namespace}
+          name={name}
+          open={manifestEditorOpen}
+          onClose={() => setManifestEditorOpen(false)}
+        />
+      )}
     </>
   )
 }

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/rs/zerolog"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/remotecommand"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/tm4rtin17/controlroom/internal/api/middleware"
 	"github.com/tm4rtin17/controlroom/internal/k8s"
@@ -78,6 +80,8 @@ func MountHTTP(authed fiber.Router, d Deps) {
 	g.Put("/configmaps/:namespace/:name", d.updateConfigMapHandler)
 	g.Get("/secrets", d.listSecretsHandler)
 	g.Get("/secrets/:namespace/:name", d.secretDetailHandler)
+	g.Get("/manifest", d.getManifestHandler)
+	g.Post("/manifest", d.applyManifestHandler)
 }
 
 // MountWS registers WebSocket routes on the ws group.
@@ -999,4 +1003,214 @@ done:
 			"bytes_out":   bytesOut.Load(),
 		},
 	})
+}
+
+// ---- manifest handlers ----
+
+// validManifestKind checks the kind query param is in the editable allowlist.
+func validManifestKind(kind string) bool {
+	switch strings.ToLower(kind) {
+	case "deployment", "statefulset", "daemonset", "service", "configmap":
+		return true
+	}
+	return false
+}
+
+type manifestResp struct {
+	YAML            string `json:"yaml"`
+	ResourceVersion string `json:"resource_version"`
+	GVK             struct {
+		Group   string `json:"group"`
+		Version string `json:"version"`
+		Kind    string `json:"kind"`
+	} `json:"gvk"`
+}
+
+func (d Deps) getManifestHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	kind := c.Query("kind")
+	namespace := c.Query("namespace")
+	name := c.Query("name")
+
+	if !validManifestKind(kind) {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid kind %q: must be deployment, statefulset, daemonset, service, or configmap", kind))
+	}
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid name")
+	}
+
+	yamlOut, rv, gvk, err := d.Client.GetManifest(c.Context(), kind, namespace, name)
+	if err != nil {
+		var kindErr k8s.ErrManifestKind
+		if errors.As(err, &kindErr) {
+			return fiber.NewError(http.StatusBadRequest, kindErr.Error())
+		}
+		if errors.Is(err, k8s.ErrManifestNotFound) {
+			return fiber.NewError(http.StatusNotFound, "resource not found")
+		}
+		if errors.Is(err, k8s.ErrManifestForbidden) {
+			return fiber.NewError(http.StatusForbidden, "forbidden")
+		}
+		return fiber.NewError(http.StatusInternalServerError, "get manifest: "+err.Error())
+	}
+
+	resp := manifestResp{
+		YAML:            yamlOut,
+		ResourceVersion: rv,
+	}
+	resp.GVK.Group = gvk.Group
+	resp.GVK.Version = gvk.Version
+	resp.GVK.Kind = gvk.Kind
+	return c.JSON(resp)
+}
+
+type applyReq struct {
+	YAML            string `json:"yaml"`
+	ResourceVersion string `json:"resource_version"`
+	DryRun          bool   `json:"dry_run"`
+}
+
+type applyResp struct {
+	OK              bool     `json:"ok"`
+	ResourceVersion string   `json:"resource_version"`
+	Warnings        []string `json:"warnings"`
+	DryRun          bool     `json:"dry_run"`
+}
+
+func (d Deps) applyManifestHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+
+	var body applyReq
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
+	}
+	if body.YAML == "" {
+		return fiber.NewError(http.StatusBadRequest, "yaml is required")
+	}
+	if body.ResourceVersion == "" {
+		return fiber.NewError(http.StatusBadRequest, "resource_version is required")
+	}
+
+	action := "k8s.manifest.apply"
+	if body.DryRun {
+		action = "k8s.manifest.dry_run"
+	}
+
+	// Extract kind/ns/name from YAML for the handler.
+	parsedKind, parsedNS, parsedName, parseErr := extractManifestMeta(body.YAML)
+	if parseErr != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid YAML: "+parseErr.Error())
+	}
+	if !validManifestKind(parsedKind) {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("kind %q is not in the editable allowlist", parsedKind))
+	}
+	if !validK8sName(parsedNS) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace in YAML metadata")
+	}
+	if !validK8sName(parsedName) {
+		return fiber.NewError(http.StatusBadRequest, "invalid name in YAML metadata")
+	}
+
+	target := parsedKind + "/" + parsedNS + "/" + parsedName
+
+	newRV, warnings, err := d.Client.ApplyManifest(
+		c.Context(),
+		parsedKind, parsedNS, parsedName,
+		body.YAML, body.ResourceVersion, body.DryRun,
+	)
+
+	entry := store.AuditEntry{
+		IP:      c.IP(),
+		Action:  action,
+		Target:  target,
+		Outcome: "success",
+		Detail: map[string]any{
+			"kind":      parsedKind,
+			"namespace": parsedNS,
+			"name":      parsedName,
+			"bytes":     len(body.YAML),
+			"dry_run":   body.DryRun,
+		},
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{
+			"kind":      parsedKind,
+			"namespace": parsedNS,
+			"name":      parsedName,
+			"bytes":     len(body.YAML),
+			"dry_run":   body.DryRun,
+			"error":     err.Error(),
+		}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+
+		var kindErr k8s.ErrManifestKind
+		var mismatchErr k8s.ErrManifestMismatch
+		var invalidErr k8s.ErrManifestInvalid
+		switch {
+		case errors.As(err, &kindErr):
+			return fiber.NewError(http.StatusBadRequest, kindErr.Error())
+		case errors.As(err, &mismatchErr):
+			return fiber.NewError(http.StatusBadRequest, mismatchErr.Error())
+		case errors.As(err, &invalidErr):
+			return fiber.NewError(http.StatusUnprocessableEntity, invalidErr.Message)
+		case errors.Is(err, k8s.ErrManifestConflict):
+			return fiber.NewError(http.StatusConflict, "conflict — resource was modified by another process; reload and retry")
+		case errors.Is(err, k8s.ErrManifestNotFound):
+			return fiber.NewError(http.StatusNotFound, "resource not found")
+		case errors.Is(err, k8s.ErrManifestForbidden):
+			return fiber.NewError(http.StatusForbidden, "forbidden")
+		}
+		return fiber.NewError(http.StatusInternalServerError, "apply manifest: "+err.Error())
+	}
+
+	_ = d.DB.WriteAudit(c.Context(), entry)
+
+	rv := newRV
+	if body.DryRun {
+		rv = body.ResourceVersion
+	}
+
+	return c.JSON(applyResp{
+		OK:              true,
+		ResourceVersion: rv,
+		Warnings:        warnings,
+		DryRun:          body.DryRun,
+	})
+}
+
+// extractManifestMeta parses the YAML document minimally to obtain kind,
+// metadata.namespace, and metadata.name without the full unstructured decode.
+func extractManifestMeta(yamlText string) (kind, namespace, name string, err error) {
+	var doc struct {
+		Kind     string `json:"kind"`
+		Metadata struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"metadata"`
+	}
+	if unmarshalErr := sigsyaml.Unmarshal([]byte(yamlText), &doc); unmarshalErr != nil {
+		return "", "", "", unmarshalErr
+	}
+	if doc.Kind == "" {
+		return "", "", "", fmt.Errorf("kind is missing")
+	}
+	if doc.Metadata.Name == "" {
+		return "", "", "", fmt.Errorf("metadata.name is missing")
+	}
+	if doc.Metadata.Namespace == "" {
+		return "", "", "", fmt.Errorf("metadata.namespace is missing")
+	}
+	return strings.ToLower(doc.Kind), doc.Metadata.Namespace, doc.Metadata.Name, nil
 }

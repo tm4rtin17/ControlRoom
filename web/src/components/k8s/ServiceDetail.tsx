@@ -1,8 +1,12 @@
+import { useState } from 'react'
+
 import { useK8sServiceDetail } from '@/lib/k8s'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { K8sServiceTypePill } from './K8sStatusPill'
 import { EventsTable } from './EventsTable'
+import { ManifestEditor } from './ManifestEditor'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -27,14 +31,26 @@ export function ServiceDetail({
   const { data } = useK8sServiceDetail(open ? namespace : null, open ? name : null)
   const svc = data?.service
 
+  const [manifestEditorOpen, setManifestEditorOpen] = useState(false)
+
   return (
+  <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="font-mono break-all">{svc?.name ?? name}</SheetTitle>
-          <SheetDescription>
-            {svc ? `${svc.namespace} · ${svc.cluster_ip || '—'}` : (namespace ?? '')}
-          </SheetDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <SheetTitle className="font-mono break-all">{svc?.name ?? name}</SheetTitle>
+              <SheetDescription>
+                {svc ? `${svc.namespace} · ${svc.cluster_ip || '—'}` : (namespace ?? '')}
+              </SheetDescription>
+            </div>
+            <div className="shrink-0 pt-0.5">
+              <Button size="sm" variant="outline" onClick={() => setManifestEditorOpen(true)}>
+                Edit YAML
+              </Button>
+            </div>
+          </div>
         </SheetHeader>
 
         {data && svc && (
@@ -119,5 +135,16 @@ export function ServiceDetail({
         )}
       </SheetContent>
     </Sheet>
+
+    {namespace && name && (
+      <ManifestEditor
+        kind="service"
+        namespace={namespace}
+        name={name}
+        open={manifestEditorOpen}
+        onClose={() => setManifestEditorOpen(false)}
+      />
+    )}
+  </>
   )
 }

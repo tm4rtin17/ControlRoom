@@ -50,6 +50,7 @@ rules:
   - apiGroups: [""]
     resources:
       - configmaps
+      - services
     verbs: [update]
   # Secrets read access. Deliberately get/list only — NOT watch — so we
   # don't keep a long-lived stream of all cluster secret values open.
@@ -71,7 +72,7 @@ rules:
       - deployments
       - statefulsets
       - daemonsets
-    verbs: [patch]
+    verbs: [patch, update]
   - apiGroups: ["apps"]
     resources:
       - deployments/scale

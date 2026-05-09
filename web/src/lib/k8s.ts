@@ -318,6 +318,64 @@ export function useUpdateConfigMap() {
   })
 }
 
+export interface K8sManifest {
+  yaml: string
+  resource_version: string
+  gvk: { group: string; version: string; kind: string }
+}
+
+export interface K8sApplyResp {
+  ok: true
+  resource_version: string
+  warnings: string[]
+  dry_run: boolean
+}
+
+export function useK8sManifest(kind: string, namespace: string, name: string) {
+  return useQuery({
+    queryKey: ['k8s', 'manifest', kind, namespace, name],
+    queryFn: () =>
+      apiFetch<K8sManifest>(
+        `/api/k8s/manifest?kind=${encodeURIComponent(kind)}&namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`
+      ),
+    enabled: !!(kind && namespace && name),
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  })
+}
+
+export function useApplyManifest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      yaml,
+      resource_version,
+      dry_run,
+    }: {
+      kind: string
+      namespace: string
+      name: string
+      yaml: string
+      resource_version: string
+      dry_run: boolean
+    }) =>
+      apiFetch<K8sApplyResp>('/api/k8s/manifest', {
+        method: 'POST',
+        body: JSON.stringify({ yaml, resource_version, dry_run }),
+      }),
+    onSuccess: (_data, { kind, namespace, name, dry_run }) => {
+      if (!dry_run) {
+        qc.invalidateQueries({ queryKey: ['k8s', 'workloads', namespace, kind, name, 'detail'] })
+        qc.invalidateQueries({ queryKey: ['k8s', 'workloads', namespace] })
+        qc.invalidateQueries({ queryKey: ['k8s', 'services', namespace, name, 'detail'] })
+        qc.invalidateQueries({ queryKey: ['k8s', 'services', namespace] })
+        qc.invalidateQueries({ queryKey: ['k8s', 'configmap', 'detail', namespace, name] })
+        qc.invalidateQueries({ queryKey: ['k8s', 'configmaps', namespace] })
+      }
+    },
+  })
+}
+
 export function useRestartWorkload() {
   const qc = useQueryClient()
   return useMutation({

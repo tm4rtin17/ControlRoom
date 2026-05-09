@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { ConditionsTable } from './ConditionsTable'
 import { EventsTable } from './EventsTable'
+import { ManifestEditor } from './ManifestEditor'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -55,6 +56,7 @@ export function WorkloadDetail({
   const [restartOpen, setRestartOpen] = useState(false)
   const [scaleOpen, setScaleOpen] = useState(false)
   const [scaleReplicas, setScaleReplicas] = useState<number>(0)
+  const [manifestEditorOpen, setManifestEditorOpen] = useState(false)
 
   const w = data?.workload
   const pct = w && w.ready.desired > 0 ? (w.ready.current / w.ready.desired) * 100 : 0
@@ -77,6 +79,7 @@ export function WorkloadDetail({
   }
 
   return (
+  <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
@@ -95,6 +98,9 @@ export function WorkloadDetail({
               )}
               <Button size="sm" variant="outline" onClick={() => setRestartOpen(true)}>
                 Restart
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setManifestEditorOpen(true)}>
+                Edit YAML
               </Button>
             </div>
           </div>
@@ -197,5 +203,16 @@ export function WorkloadDetail({
         </AlertDialogContent>
       </AlertDialog>
     </Sheet>
+
+    {namespace && kind && name && (
+      <ManifestEditor
+        kind={kind.toLowerCase() as 'deployment' | 'statefulset' | 'daemonset'}
+        namespace={namespace}
+        name={name}
+        open={manifestEditorOpen}
+        onClose={() => setManifestEditorOpen(false)}
+      />
+    )}
+  </>
   )
 }
