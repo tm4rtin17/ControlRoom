@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "v*"
   pull_request:
 
 permissions:
@@ -10,33 +12,47 @@ permissions:
 
 jobs:
   go:
-    name: Go (lint + test)
+    name: Go (vet + lint + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          # Pull the Go version from go.mod so CI can't drift from the
+          # toolchain the binary actually requires.
+          go-version-file: go.mod
           cache: true
 
-      - name: Ensure web/dist exists for embed
+      - name: Ensure embedded SPA stub exists
+        # internal/web/web.go does //go:embed all:dist from its own
+        # package directory, so the dir internal/web/dist/ must exist
+        # with an index.html for the Go side to compile. CI doesn't
+        # run the Vite build in this job — a placeholder is enough.
         run: |
-          mkdir -p web/dist
-          if [ ! -f web/dist/index.html ]; then
-            echo '<!doctype html><title>stub</title>' > web/dist/index.html
+          mkdir -p internal/web/dist
+          if [ ! -f internal/web/dist/index.html ]; then
+            echo '<!doctype html><title>stub</title>' > internal/web/dist/index.html
           fi
 
       - name: Download modules
         run: go mod download
 
+      - name: Vet
+        run: go vet ./...
+
       - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
+          # `latest` resolves to a release new enough to handle Go 1.25.
+          # Pin if we ever see CI flake from a lint upgrade.
           version: latest
-          args: --timeout=5m
+          args: --timeout=10m
 
       - name: Test
-        run: go test -race ./...
+        # Scoped to our own packages — `./...` would also descend into
+        # web/node_modules/flatted/golang/pkg/flatted (an npm dep that
+        # ships an embedded .go file in its tree).
+        run: go test -race ./internal/... ./cmd/...
 
   web:
     name: Web (typecheck + build)
@@ -49,6 +65,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Install
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
