@@ -95,7 +95,6 @@ func (f *Fake) transition(id, state string, started, finished time.Time) error {
 		return errors.New("not found")
 	}
 	c.State = state
-	c.Container.State = state
 	if !started.IsZero() {
 		c.StartedAt = started
 		c.FinishedAt = time.Time{}

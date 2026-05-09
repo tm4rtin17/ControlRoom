@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Pause, Play, RefreshCw, Search } from 'lucide-react'
 
+import { ApiError } from '@/lib/api'
+import { type ContainerSummary, type LogFrame, useContainers } from '@/lib/containers'
 import { type LogEntry, type LogQuery, tailURL, useLogs } from '@/lib/logs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -27,47 +29,70 @@ const PRIORITIES = [
   { label: 'Debug', value: 7 },
 ]
 
+type Source = 'journal' | 'containers'
+
 export function Logs() {
+  const [source, setSource] = useState<Source>('journal')
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-xl font-semibold tracking-tight">Logs</h1>
+        <div className="inline-flex items-center rounded-md border bg-background p-0.5 text-xs">
+          <SourceTab active={source === 'journal'} onClick={() => setSource('journal')}>
+            Journal
+          </SourceTab>
+          <SourceTab active={source === 'containers'} onClick={() => setSource('containers')}>
+            Containers
+          </SourceTab>
+        </div>
+      </div>
+      {source === 'journal' ? <JournalView onSwitchToContainers={() => setSource('containers')} /> : <ContainersView />}
+    </div>
+  )
+}
+
+function SourceTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'rounded-sm px-3 py-1',
+        active ? 'bg-primary/10 text-foreground ring-1 ring-primary/30' : 'text-muted-foreground hover:text-foreground'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ---- Journal ----
+
+function JournalView({ onSwitchToContainers }: { onSwitchToContainers: () => void }) {
   const [unit, setUnit] = useState('')
   const [search, setSearch] = useState('')
   const [since, setSince] = useState('-15min')
   const [priority, setPriority] = useState<number>(-1)
   const [live, setLive] = useState(false)
 
-  // Static query when not live; live tail keeps its own state.
   const query: LogQuery = useMemo(
     () => ({ unit: unit || undefined, q: search || undefined, since, priority, n: 200 }),
     [unit, search, since, priority]
   )
   const stat = useLogs(query, !live)
 
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">Logs</h1>
-        <div className="flex gap-2">
-          {!live && (
-            <Button size="sm" variant="outline" onClick={() => stat.refetch()}>
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-              Refresh
-            </Button>
-          )}
-          <Button size="sm" onClick={() => setLive((v) => !v)}>
-            {live ? (
-              <>
-                <Pause className="h-3.5 w-3.5" aria-hidden />
-                Stop tail
-              </>
-            ) : (
-              <>
-                <Play className="h-3.5 w-3.5" aria-hidden />
-                Live tail
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
+  const unavailable = stat.error instanceof ApiError && stat.error.status === 503
 
+  return (
+    <>
       <Card>
         <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-4">
           <div className="flex flex-col gap-1 sm:col-span-2">
@@ -124,23 +149,53 @@ export function Logs() {
                 </button>
               ))}
             </div>
+            <div className="ml-auto flex gap-2">
+              {!live && (
+                <Button size="sm" variant="outline" onClick={() => stat.refetch()}>
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                  Refresh
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setLive((v) => !v)} disabled={unavailable}>
+                {live ? (
+                  <>
+                    <Pause className="h-3.5 w-3.5" aria-hidden />
+                    Stop tail
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3.5 w-3.5" aria-hidden />
+                    Live tail
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {live ? (
         <LiveStream query={query} />
+      ) : unavailable ? (
+        <Card>
+          <CardContent className="flex flex-col items-start gap-3 p-6 text-sm">
+            <p className="text-muted-foreground">{stat.error?.message}</p>
+            <Button size="sm" variant="outline" onClick={onSwitchToContainers}>
+              View container logs instead
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
           {stat.error && (
             <Alert variant="destructive">
-              <AlertDescription>Could not fetch logs.</AlertDescription>
+              <AlertDescription>{stat.error.message || 'Could not fetch logs.'}</AlertDescription>
             </Alert>
           )}
           <EntriesList entries={stat.data?.entries ?? []} loading={stat.isLoading} />
         </>
       )}
-    </div>
+    </>
   )
 }
 
@@ -292,4 +347,191 @@ function formatTimestamp(s: string): string {
   const idx = s.indexOf('T')
   if (idx < 0) return s
   return s.slice(idx + 1, idx + 9)
+}
+
+// ---- Containers ----
+
+interface DockerLine {
+  stream: 'stdout' | 'stderr' | 'stdin'
+  line: string
+}
+
+function ContainersView() {
+  const list = useContainers()
+  const [selectedId, setSelectedId] = useState<string>('')
+  const [search, setSearch] = useState('')
+  const [paused, setPaused] = useState(false)
+
+  const containers = list.data?.containers ?? []
+  // Auto-pick the first running container the first time the list loads.
+  useEffect(() => {
+    if (selectedId || containers.length === 0) return
+    const running = containers.find((c) => c.state === 'running') ?? containers[0]
+    if (running) setSelectedId(running.id)
+  }, [containers, selectedId])
+
+  const unavailable = list.error instanceof ApiError && list.error.status === 503
+  const errMsg = list.error?.message
+
+  if (unavailable) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-sm text-muted-foreground">
+          {errMsg ?? 'Docker is not available on this host.'}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <>
+      <Card>
+        <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-4">
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <Label htmlFor="container" className="text-xs">Container</Label>
+            <select
+              id="container"
+              className="h-10 rounded-md border bg-background px-2 font-mono text-xs"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">— select a container —</option>
+              {containers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {labelFor(c)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <Label htmlFor="docker-search" className="text-xs">Search</Label>
+            <div className="flex items-center gap-2 rounded-md border bg-background px-2">
+              <Search className="h-4 w-4 text-muted-foreground" aria-hidden />
+              <Input
+                id="docker-search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Filter visible lines (substring)"
+                className="border-0 bg-transparent shadow-none focus-visible:ring-0"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {!selectedId ? (
+        <Card>
+          <CardContent className="px-4 py-12 text-center text-sm text-muted-foreground">
+            {list.isLoading ? 'Loading containers…' : 'Pick a container to start tailing.'}
+          </CardContent>
+        </Card>
+      ) : (
+        <DockerLogStream id={selectedId} search={search} paused={paused} setPaused={setPaused} />
+      )}
+    </>
+  )
+}
+
+function labelFor(c: ContainerSummary): string {
+  const tag = c.state === 'running' ? '●' : '○'
+  return `${tag} ${c.name} (${c.image})`
+}
+
+function DockerLogStream({
+  id,
+  search,
+  paused,
+  setPaused,
+}: {
+  id: string
+  search: string
+  paused: boolean
+  setPaused: (v: boolean) => void
+}) {
+  const [lines, setLines] = useState<DockerLine[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    setLines([])
+    setError(null)
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws/containers/${id}/logs`)
+    ws.onmessage = (evt) => {
+      try {
+        const f = JSON.parse(evt.data) as LogFrame
+        if (f.type === 'error') {
+          setError(f.err ?? 'log stream error')
+          return
+        }
+        if (f.type === 'line' && f.line !== undefined) {
+          setLines((prev) => {
+            const next = [...prev, { stream: (f.stream ?? 'stdout') as DockerLine['stream'], line: f.line! }]
+            return next.length > MAX_LIVE_ENTRIES ? next.slice(-MAX_LIVE_ENTRIES) : next
+          })
+        }
+      } catch {
+        // ignore
+      }
+    }
+    ws.onerror = () => setError('connection error')
+    return () => ws.close()
+  }, [id])
+
+  const filtered = useMemo(() => {
+    if (!search) return lines
+    const needle = search.toLowerCase()
+    return lines.filter((l) => l.line.toLowerCase().includes(needle))
+  }, [lines, search])
+
+  useEffect(() => {
+    if (paused) return
+    const el = containerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [filtered, paused])
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-2 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {filtered.length}
+            {search ? ` / ${lines.length}` : ''} line{filtered.length === 1 ? '' : 's'}
+            {paused && ' · paused'}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setPaused(!paused)}>
+              {paused ? <Play className="h-4 w-4" aria-hidden /> : <Pause className="h-4 w-4" aria-hidden />}
+              {paused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setLines([])}>
+              Clear
+            </Button>
+          </div>
+        </div>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div
+          ref={containerRef}
+          className="h-[28rem] overflow-auto rounded-md border bg-background p-3 font-mono text-[11px] leading-relaxed"
+        >
+          {filtered.length === 0 ? (
+            <p className="text-muted-foreground">{lines.length === 0 ? 'Waiting for output…' : 'No lines match the filter.'}</p>
+          ) : (
+            filtered.map((l, i) => (
+              <div
+                key={i}
+                className={cn('whitespace-pre-wrap break-all', l.stream === 'stderr' && 'text-amber-500')}
+              >
+                {l.line}
+              </div>
+            ))
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
 }

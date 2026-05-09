@@ -1,27 +1,105 @@
-# ControlRoom — minimal compose file.
+# ControlRoom — fat-privileged docker-compose deployment.
 #
-# Notes for container deployment:
-#   - systemd dbus and journalctl are not available inside the container,
-#     so /api/services and /api/logs return 503. Use the bare-metal install
-#     (deploy/install.sh) if you need those.
-#   - Mount the Docker socket read-only to manage other containers.
-#   - For Let's Encrypt: set CR_TLS_MODE=acme + CR_ACME_HOST + CR_ACME_EMAIL,
-#     and expose port 80 below for the HTTP-01 challenge.
+# SECURITY MODEL
+# ==============
+# This deployment runs as root with host network/PID namespaces and broad
+# Linux capabilities. A compromise of the ControlRoom process is effectively
+# root on the host. This is intentional for a single-user homelab where the
+# operator already has root, and is the only way to drive all integrations
+# from a container without a sidecar or privileged DaemonSet.
+#
+# If the privilege model concerns you, use deploy/install.sh instead — it
+# installs ControlRoom as a bare-metal systemd service with a scoped sudoers
+# file and no container involved.
+#
+# INTEGRATION REQUIREMENTS
+# ========================
+# Integration    | Mount / Cap needed
+# ---------------|-----------------------------------------------------------
+# Docker         | /var/run/docker.sock:ro  (root has access without group_add)
+# Kubernetes     | /etc/rancher/k3s/k3s.yaml:ro  (127.0.0.1:6443 reachable via
+#                |   network_mode:host; no kubeconfig rewrite needed)
+# Terminal       | pid:host + SYS_ADMIN  (nsenter -t 1 reaches systemd/PID 1)
+# Journal Logs   | /run/log/journal:ro + /var/log/journal:ro + /etc/machine-id:ro
+# Services       | /var/run/dbus/system_bus_socket:rw  (dbus client in image)
+# Updates (apt)  | /var/cache/apt:rw + /etc/apt:ro + /var/lib/dpkg:ro
+#                |   root in container → sudo apt-get is a no-op passthrough
+# Network (ip)   | network_mode:host  (ip addr shows host interfaces)
+# Network (ufw)  | network_mode:host + NET_ADMIN  (ufw needs iptables access)
+#
+# PORTS
+# =====
+# network_mode:host binds directly to the host's :8443. No ports: mapping
+# needed (and it would be ignored anyway). Access via https://<host-ip>:8443.
 
 services:
   controlroom:
-    image: ghcr.io/tm4rtin17/controlroom:latest
+    image: controlroom:dev
     container_name: controlroom
     restart: unless-stopped
-    ports:
-      - "8443:8443"
-      # Uncomment when CR_TLS_MODE=acme to serve HTTP-01 challenges:
-      # - "80:80"
+
+    # Share host namespaces so nsenter and ip/ufw see the real host.
+    network_mode: host
+    pid: host
+
+    # Broad caps required for nsenter (SYS_ADMIN), ps/top in host PID ns
+    # (SYS_PTRACE), and ufw/iptables (NET_ADMIN).
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - NET_ADMIN
+
+    # Lift AppArmor and seccomp confinement so nsenter and host commands are
+    # not blocked by the Docker daemon's default profiles.
+    security_opt:
+      - apparmor:unconfined
+      - seccomp:unconfined
+
+    # Run as root (uid 0). Linux drops capabilities on uid transitions, so
+    # we must stay root for SYS_ADMIN to remain in effect.
+    user: "0:0"
+
     volumes:
+      # Persistent app data (JWT key, SQLite DB, TLS material).
       - controlroom-data:/data
+
+      # Docker socket — root has access without group_add.
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # dbus system bus — for the Services tab (systemctl start/stop via dbus).
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:rw
+
+      # Journal logs — /run/log/journal is the volatile (current boot) location;
+      # /var/log/journal is the persistent location (if configured).
+      - /run/log/journal:/run/log/journal:ro
+      - /var/log/journal:/var/log/journal:ro
+
+      # journalctl requires the host machine-id to identify log entries.
+      - /etc/machine-id:/etc/machine-id:ro
+
+      # K3s kubeconfig — mount directly; network_mode:host makes 127.0.0.1:6443
+      # reachable without any server-URL rewrite (cert SAN includes 127.0.0.1).
+      # deploy/scripts/setup-host-kubeconfig.sh is no longer needed.
+      - /etc/rancher/k3s/k3s.yaml:/etc/k3s/kubeconfig:ro
+
+      # apt integration — rw cache so `apt-get update` can refresh package lists;
+      # dpkg state and sources are read-only.
+      - /var/cache/apt:/var/cache/apt:rw
+      - /etc/apt:/etc/apt:ro
+      - /var/lib/dpkg:/var/lib/dpkg:ro
+
     environment:
       CR_TLS_MODE: selfsigned
+      # client-go reads $KUBECONFIG; matches the mount above.
+      KUBECONFIG: /etc/k3s/kubeconfig
+      # Signals pty.go to wrap interactive shells with nsenter -t 1.
+      CR_HOST_SHELL: "true"
+      # When true, the terminal spawns /bin/login (PAM auth via the host's
+      # /etc/pam.d/login policy) instead of dropping straight into root's
+      # shell. Mirrors SSH UX: the operator types host credentials in the
+      # xterm and login(1) execs the user's shell at the user's uid only on
+      # success. Strongly recommended whenever CR_HOST_SHELL is true.
+      CR_TERMINAL_LOGIN: "true"
       # CR_TLS_MODE: acme
       # CR_ACME_HOST: ctrl.example.com
       # CR_ACME_EMAIL: admin@example.com
@@ -29,4 +107,11 @@ services:
       # CR_TRUST_PROXY: "true"   # set when behind a reverse proxy
 
 volumes:
+  # External so compose reuses the existing host-level volume instead of
+  # creating a project-namespaced one (`deploy_controlroom-data`). Without
+  # this, switching between `docker run -v controlroom-data:/data` and
+  # `docker compose up` silently lands on different volumes — operator's
+  # admin account, JWT key, and TLS material are stranded on the other
+  # volume and the SPA shows the first-run setup wizard.
   controlroom-data:
+    external: true

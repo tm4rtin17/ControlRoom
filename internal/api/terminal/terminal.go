@@ -34,7 +34,9 @@ type Deps struct {
 	Logger zerolog.Logger
 	// IdleTimeout closes a session after this much inactivity (no read or
 	// write). Zero falls back to defaultIdleTimeout.
-	IdleTimeout time.Duration
+	IdleTimeout   time.Duration
+	HostShell     bool // passed through from cfg.HostShell; wraps shell in nsenter
+	TerminalLogin bool // passed through from cfg.TerminalLogin; spawn login(1) for PAM auth
 }
 
 const (
@@ -96,9 +98,11 @@ func (d Deps) handler(c *websocket.Conn) {
 
 	sessionID := mintSessionID()
 	sess, err := pty.New(sessionID, pty.Options{
-		Shell: init.Shell,
-		Rows:  init.Rows,
-		Cols:  init.Cols,
+		Shell:     init.Shell,
+		Rows:      init.Rows,
+		Cols:      init.Cols,
+		HostShell: d.HostShell,
+		LoginMode: d.TerminalLogin,
 	})
 	if err != nil {
 		_ = c.WriteJSON(errorFrame{Type: "error", Err: err.Error()})

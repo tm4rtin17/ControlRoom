@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: controlroom
+  namespace: controlroom
+  annotations:
+    # Traefik: passthrough HTTPS to the backend (pod handles TLS itself).
+    # If you switch to cert-manager + Ingress-terminated TLS, remove this
+    # annotation and configure the tls block below with a real secretName.
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # TODO: add cert-manager annotation when cert is issued, e.g.:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # (matches roninlab-ingress-specialist ClusterIssuer naming)
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: controlroom.roninlab.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: controlroom
+                port:
+                  number: 443
+  tls:
+    - hosts:
+        - controlroom.roninlab.dev
+      # TODO: replace with a cert-manager-issued Secret once the ClusterIssuer
+      # is wired up. Until then, Traefik serves its default self-signed cert
+      # for this host. Example:
+      #   secretName: controlroom-tls

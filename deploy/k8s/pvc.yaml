@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: controlroom-data
+  namespace: controlroom
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path  # K3s default local-path-provisioner
+  resources:
+    requests:
+      storage: 1Gi

@@ -8,6 +8,7 @@ import {
   Download,
   LogOut,
   Menu,
+  Package,
   ScrollText,
   ServerCog,
   Settings,
@@ -20,15 +21,26 @@ import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { PublicBindBanner } from '@/components/PublicBindBanner'
 import { useLogout, useMe } from '@/lib/auth'
-import { useSystemOverview } from '@/lib/system'
+import { type SystemCapabilities, useCapabilities, useSystemOverview } from '@/lib/system'
 import { cn } from '@/lib/utils'
 import { useNavigate } from 'react-router-dom'
 
-const NAV: { to: string; label: string; Icon: typeof Activity; ready?: boolean }[] = [
+// `requires` names a backend capability that must be true (per
+// /api/system/capabilities) for the entry to render. Unset = always show.
+type NavEntry = {
+  to: string
+  label: string
+  Icon: typeof Activity
+  ready?: boolean
+  requires?: keyof SystemCapabilities
+}
+
+const NAV: NavEntry[] = [
   { to: '/', label: 'Dashboard', Icon: Activity, ready: true },
   { to: '/updates', label: 'Updates', Icon: Download, ready: true },
-  { to: '/services', label: 'Services', Icon: Cog, ready: true },
-  { to: '/containers', label: 'Containers', Icon: Container, ready: true },
+  { to: '/services', label: 'Services', Icon: Cog, ready: true, requires: 'systemd' },
+  { to: '/containers', label: 'Containers', Icon: Container, ready: true, requires: 'docker' },
+  { to: '/kubernetes', label: 'Kubernetes', Icon: Package, ready: true, requires: 'kubernetes' },
   { to: '/terminal', label: 'Terminal', Icon: TerminalIcon, ready: true },
   { to: '/network', label: 'Network', Icon: Wifi, ready: true },
   { to: '/logs', label: 'Logs', Icon: ScrollText, ready: true },
@@ -50,6 +62,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const caps = useCapabilities()
+  // While capabilities are loading we show every entry; if the request fails
+  // we also fall back to showing them (better to surface a 503 once than to
+  // hide tabs that should be available).
+  const visible = NAV.filter((entry) => {
+    if (!entry.requires) return true
+    if (!caps.data) return true
+    return caps.data[entry.requires]
+  })
+
   return (
     <>
       {/* Mobile drawer overlay */}
@@ -78,7 +100,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
           </button>
         </div>
         <nav className="flex-1 space-y-0.5 px-2">
-          {NAV.map(({ to, label, Icon, ready }) => (
+          {visible.map(({ to, label, Icon, ready }) => (
             <NavLink
               key={to}
               to={to}

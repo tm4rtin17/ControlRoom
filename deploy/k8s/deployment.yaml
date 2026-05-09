@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlroom
+  namespace: controlroom
+  labels:
+    app.kubernetes.io/name: controlroom
+    app.kubernetes.io/component: server
+spec:
+  # Single replica by design: JWT signing key, SQLite DB, and TLS material
+  # all live on the PVC. Running >1 replica requires migrating to an external
+  # DB and shared-nothing session storage — defer to Phase C.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: controlroom
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: controlroom
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: controlroom
+
+      # projected SA token is automatically mounted by Kubernetes;
+      # client-go inside the binary finds it at the standard in-cluster path.
+      # Do NOT mount host docker.sock or /etc/rancher/k3s/k3s.yaml here.
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532   # distroless "nonroot" uid
+        runAsGroup: 65532
+        fsGroup: 65532     # ensures PVC mount is writable by uid 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: controlroom
+          # Default: local image imported via `docker save | k3s ctr images import`.
+          # For production, switch to: ghcr.io/tm4rtin17/controlroom:v0.2
+          image: controlroom:dev
+          imagePullPolicy: IfNotPresent
+
+          env:
+            # selfsigned: binary generates a self-signed cert and stores it in
+            # CR_DATA_DIR on first boot. Flip to CR_TLS_MODE=acme when this Pod
+            # is fronted by an Ingress with cert-manager — in that case set
+            # CR_ACME_HOST and CR_ACME_EMAIL and expose port 80 for HTTP-01.
+            - name: CR_TLS_MODE
+              value: selfsigned
+            - name: CR_DATA_DIR
+              value: /data
+            - name: CR_ADDR
+              value: :8443
+
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true  # binary writes nothing to /; all state goes to /data
+            capabilities:
+              drop: [ALL]
+
+          # Kubelet skips TLS verification on HTTPS probes by design, so self-signed
+          # certs work here without any additional configuration.
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 10
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m    # generous ceiling; Pi4 cores can burst but we cap at 0.5
+              memory: 256Mi
+
+          volumeMounts:
+            - name: controlroom-data
+              mountPath: /data
+
+      volumes:
+        - name: controlroom-data
+          persistentVolumeClaim:
+            claimName: controlroom-data

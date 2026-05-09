@@ -53,6 +53,10 @@ func (c *DockerClient) List(ctx context.Context, opts ListOptions) ([]Container,
 	}
 	out := make([]Container, 0, len(summaries))
 	for _, s := range summaries {
+		labels := s.Labels
+		if labels == nil {
+			labels = map[string]string{}
+		}
 		c := Container{
 			ID:        shortID(s.ID),
 			Name:      primaryName(s.Names),
@@ -60,10 +64,11 @@ func (c *DockerClient) List(ctx context.Context, opts ListOptions) ([]Container,
 			State:     s.State,
 			Status:    s.Status,
 			CreatedAt: time.Unix(s.Created, 0),
-			Labels:    s.Labels,
+			Labels:    labels,
+			Ports:     []Port{},
 		}
-		c.ComposeProject = s.Labels["com.docker.compose.project"]
-		c.ComposeService = s.Labels["com.docker.compose.service"]
+		c.ComposeProject = labels["com.docker.compose.project"]
+		c.ComposeService = labels["com.docker.compose.service"]
 		for _, p := range s.Ports {
 			c.Ports = append(c.Ports, Port{
 				IP:          p.IP,
@@ -86,6 +91,21 @@ func (c *DockerClient) Inspect(ctx context.Context, id string) (*ContainerDetail
 	startedAt, _ := time.Parse(time.RFC3339Nano, j.State.StartedAt)
 	finishedAt, _ := time.Parse(time.RFC3339Nano, j.State.FinishedAt)
 
+	cfgLabels := j.Config.Labels
+	if cfgLabels == nil {
+		cfgLabels = map[string]string{}
+	}
+	cmd := j.Config.Entrypoint
+	if cmd == nil {
+		cmd = []string{}
+	}
+	if j.Config.Cmd != nil {
+		cmd = append(cmd, j.Config.Cmd...)
+	}
+	env := j.Config.Env
+	if env == nil {
+		env = []string{}
+	}
 	d := &ContainerDetail{
 		Container: Container{
 			ID:        shortID(j.ID),
@@ -94,19 +114,19 @@ func (c *DockerClient) Inspect(ctx context.Context, id string) (*ContainerDetail
 			State:     j.State.Status,
 			Status:    j.State.Status,
 			CreatedAt: createdAt,
-			Labels:    j.Config.Labels,
+			Labels:    cfgLabels,
+			Ports:     []Port{},
 		},
-		Command:    j.Config.Entrypoint,
-		Env:        j.Config.Env,
+		Command:    cmd,
+		Env:        env,
+		Mounts:     []Mount{},
+		Networks:   []NetworkAttach{},
 		StartedAt:  startedAt,
 		FinishedAt: finishedAt,
 		ExitCode:   j.State.ExitCode,
 	}
-	if j.Config.Cmd != nil {
-		d.Command = append(d.Command, j.Config.Cmd...)
-	}
-	d.ComposeProject = j.Config.Labels["com.docker.compose.project"]
-	d.ComposeService = j.Config.Labels["com.docker.compose.service"]
+	d.ComposeProject = cfgLabels["com.docker.compose.project"]
+	d.ComposeService = cfgLabels["com.docker.compose.service"]
 	if j.HostConfig != nil {
 		d.RestartPolicy = string(j.HostConfig.RestartPolicy.Name)
 	}

@@ -73,6 +73,21 @@ export interface SystemOverview {
 
 export const SYSTEM_OVERVIEW_KEY = ['system', 'overview'] as const
 
+export interface SystemCapabilities {
+  systemd: boolean
+  docker: boolean
+  journal: boolean
+  kubernetes: boolean
+}
+
+export function useCapabilities() {
+  return useQuery<SystemCapabilities>({
+    queryKey: ['system', 'capabilities'],
+    queryFn: () => apiFetch<SystemCapabilities>('/api/system/capabilities'),
+    staleTime: Infinity,
+  })
+}
+
 export function useSystemOverview() {
   // REST polling at 5s acts as a fallback when the WS isn't connected. Once
   // the WS push pipeline starts updating cache, polling stays in step but is

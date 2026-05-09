@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -39,6 +40,19 @@ type Filter struct {
 	Search   string
 	N        int // last-N entries (0 → no limit on tail mode; 200 default for static)
 }
+
+// Available reports whether `journalctl` is present in PATH. The result is
+// cached for the lifetime of the process; we don't expect journalctl to come
+// or go after boot.
+//
+// In container deployments (distroless image) this is false, and the API
+// surface should return 503 rather than 500 with a confusing exec error.
+func Available() bool { return availableOnce() }
+
+var availableOnce = sync.OnceValue(func() bool {
+	_, err := exec.LookPath("journalctl")
+	return err == nil
+})
 
 // validUnit blocks shell injection through the unit name without locking us
 // down to one filename pattern.
