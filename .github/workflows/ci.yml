@@ -41,11 +41,13 @@ jobs:
         run: go vet ./...
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          # `latest` resolves to a release new enough to handle Go 1.25.
-          # Pin if we ever see CI flake from a lint upgrade.
-          version: latest
+          # The lint binary itself must be built with Go ≥ go.mod's go
+          # directive — otherwise it refuses with "language version
+          # used to build golangci-lint is lower than the targeted
+          # Go version". v2.5.0+ is built with Go 1.25.
+          version: v2.5.0
           args: --timeout=10m
 
       - name: Test
