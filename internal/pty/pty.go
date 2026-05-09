@@ -39,6 +39,9 @@ var AllowedShells = []string{
 // PreferredShells is the fallback order if the client doesn't specify one.
 var PreferredShells = []string{"/bin/bash", "/bin/sh"}
 
+// NsenterPath is the expected location of nsenter inside the container image.
+const NsenterPath = "/usr/bin/nsenter"
+
 // MaxRows / MaxCols clamp window-size requests to sane bounds.
 const (
 	MaxRows = 500
@@ -67,10 +70,11 @@ type Session struct {
 
 // Options for New. Fields left zero/empty fall back to safe defaults.
 type Options struct {
-	Shell string // "" → first existing entry of PreferredShells
-	Rows  int
-	Cols  int
-	Env   []string // appended to the sanitized base env
+	Shell     string   // "" → first existing entry of PreferredShells
+	Rows      int
+	Cols      int
+	Env       []string // appended to the sanitized base env
+	HostShell bool     // wrap spawned process in nsenter -t 1 -m -u -i -n -p
 }
 
 // New starts a shell under a fresh PTY. The returned Session is hot — the
@@ -81,9 +85,22 @@ func New(id string, opts Options) (*Session, error) {
 		return nil, err
 	}
 
+	if opts.HostShell {
+		if _, err := os.Stat(NsenterPath); err != nil {
+			return nil, errors.New("CR_HOST_SHELL=true but /usr/bin/nsenter not found in image")
+		}
+	}
+
 	rows, cols := clampSize(opts.Rows, opts.Cols)
 
-	cmd := exec.Command(shell)
+	var cmd *exec.Cmd
+	if opts.HostShell {
+		// Enter all host namespaces (mount, uts, ipc, net, pid) via PID 1 so
+		// the operator gets a full host shell, not the container's view.
+		cmd = exec.Command(NsenterPath, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", shell, "--login")
+	} else {
+		cmd = exec.Command(shell)
+	}
 	cmd.Env = baseEnv(opts.Env, shell)
 	// Run in its own session so signals stay scoped.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

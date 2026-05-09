@@ -34,6 +34,7 @@ type Config struct {
 	HostName     string
 	VersionCheck bool
 	DevMode      bool
+	HostShell    bool // CR_HOST_SHELL — wrap terminal in nsenter -t 1 to enter host namespaces
 }
 
 func Load() (*Config, error) {
@@ -50,6 +51,7 @@ func Load() (*Config, error) {
 		HostName:     os.Getenv("CR_HOST_NAME"),
 		VersionCheck: envBool("CR_VERSION_CHECK", false),
 		DevMode:      envBool("CR_DEV", false),
+		HostShell:    envBool("CR_HOST_SHELL", false),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err

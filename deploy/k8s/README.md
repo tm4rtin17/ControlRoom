@@ -58,3 +58,11 @@ targeted write operations (scale, restart). Phase D adds Helm/Kustomize.
 - The pod does not mount docker.sock or the host kubeconfig. All cluster access
   flows through the projected ServiceAccount token at the standard in-cluster
   path (/var/run/secrets/kubernetes.io/serviceaccount/).
+- **Privilege model**: This in-cluster Pod deployment is the unprivileged path.
+  It runs as nonroot uid 65532, drops ALL Linux capabilities, and uses a
+  scoped controlroom-reader ClusterRole with get/list/watch verbs only. This
+  contrasts with the docker-compose deployment (deploy/docker-compose.yml),
+  which is fat-privileged: root uid, pid:host + network_mode:host, and
+  cap_add SYS_ADMIN/SYS_PTRACE/NET_ADMIN to enable the Terminal, Journal,
+  Services, Updates, and Network integrations. Choose the in-cluster path if
+  the docker-compose privilege model is not acceptable for your environment.

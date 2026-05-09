@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 #
-# Generate a kubeconfig for the docker-compose deployment of ControlRoom to
-# reach the host's K3s API server. The container can't reach 127.0.0.1 from
-# inside its network namespace, so we rewrite the server URL to the host's
-# real IP — which must be in K3s' TLS SANs.
+# NOTE: This script is NO LONGER NEEDED for the standard docker-compose
+# deployment. Since docker-compose.yml now uses network_mode:host, the
+# container shares the host network namespace and can reach the K3s API
+# at 127.0.0.1:6443 directly. The original /etc/rancher/k3s/k3s.yaml is
+# mounted read-only as /etc/k3s/kubeconfig inside the container — no
+# server-URL rewrite is required.
 #
-# Run once on the host as root before `docker compose up`:
+# This script is retained for non-host-network deployments (e.g. a custom
+# bridge network or a remote ControlRoom instance pointing at a separate
+# K3s host). In those cases the container cannot reach 127.0.0.1:6443, so
+# the server URL must be rewritten to the host's real IP that is in the
+# K3s TLS SAN list.
+#
+# Usage (non-host-network deployments only):
 #
 #   sudo deploy/scripts/setup-host-kubeconfig.sh
 #

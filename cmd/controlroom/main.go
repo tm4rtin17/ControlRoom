@@ -65,6 +65,7 @@ func run() error {
 		Str("tls_mode", string(cfg.TLSMode)).
 		Bool("trust_proxy", cfg.TrustProxy).
 		Bool("dev_mode", cfg.DevMode).
+		Bool("host_shell", cfg.HostShell).
 		Msg("controlroom starting")
 
 	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
