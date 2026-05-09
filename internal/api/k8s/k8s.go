@@ -1,4 +1,4 @@
-// Package k8s serves /api/k8s/* — read-only cluster inspection.
+// Package k8s serves /api/k8s/* — read-only cluster inspection plus write actions.
 // If Client is nil the module is disabled and every handler returns 503.
 package k8s
 
@@ -15,12 +15,15 @@ import (
 	"github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog"
 
+	"github.com/tm4rtin17/controlroom/internal/api/middleware"
 	"github.com/tm4rtin17/controlroom/internal/k8s"
+	"github.com/tm4rtin17/controlroom/internal/store"
 )
 
 // Deps mirrors the pattern used by api/services and api/containers.
 type Deps struct {
 	Client *k8s.Client // nil → module disabled
+	DB     *store.DB
 	Logger zerolog.Logger
 }
 
@@ -40,16 +43,20 @@ func validK8sName(s string) bool {
 	return len(s) > 0 && len(s) <= 253 && dns1123RE.MatchString(s)
 }
 
-// MountHTTP registers GET routes on the authenticated router group.
+// MountHTTP registers REST endpoints on the authenticated router group.
 func MountHTTP(authed fiber.Router, d Deps) {
 	g := authed.Group("/k8s")
 	g.Get("/nodes", d.nodesHandler)
 	g.Get("/nodes/:name", d.nodeDetailHandler)
+	g.Post("/nodes/:name/cordon", d.cordonNodeHandler)
 	g.Get("/namespaces", d.namespacesHandler)
 	g.Get("/workloads", d.workloadsHandler)
 	g.Get("/workloads/:namespace/:kind/:name", d.workloadDetailHandler)
+	g.Post("/workloads/:namespace/:kind/:name/restart", d.restartWorkloadHandler)
+	g.Post("/workloads/:namespace/:kind/:name/scale", d.scaleWorkloadHandler)
 	g.Get("/pods", d.podsHandler)
 	g.Get("/pods/:namespace/:name", d.podDetailHandler)
+	g.Delete("/pods/:namespace/:name", d.deletePodHandler)
 	g.Get("/services", d.servicesHandler)
 	g.Get("/services/:namespace/:name", d.serviceDetailHandler)
 }
@@ -225,6 +232,195 @@ func (d Deps) serviceDetailHandler(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusInternalServerError, "get service: "+err.Error())
 	}
 	return c.JSON(detail)
+}
+
+// ---- write action handlers ----
+
+func (d Deps) restartWorkloadHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	namespace := c.Params("namespace")
+	kind := c.Params("kind")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	if !validWorkloadKind(kind) {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid workload kind %q: must be deployment, statefulset, or daemonset", kind))
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid workload name")
+	}
+
+	normalKind := strings.ToLower(kind)
+	err := d.Client.RestartWorkload(c.Context(), namespace, normalKind, name)
+	entry := store.AuditEntry{
+		IP:      c.IP(),
+		Action:  "k8s." + normalKind + ".restart",
+		Target:  namespace + "/" + name,
+		Outcome: "success",
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{"error": err.Error()}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+		return fiber.NewError(http.StatusInternalServerError, "restart failed: "+err.Error())
+	}
+	_ = d.DB.WriteAudit(c.Context(), entry)
+	return c.JSON(fiber.Map{"ok": true, "message": "rollout restarted"})
+}
+
+func (d Deps) scaleWorkloadHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	namespace := c.Params("namespace")
+	kind := c.Params("kind")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	normalKind := strings.ToLower(kind)
+	if normalKind == "daemonset" {
+		return fiber.NewError(http.StatusBadRequest, "daemonsets cannot be scaled")
+	}
+	if normalKind != "deployment" && normalKind != "statefulset" {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid workload kind %q: must be deployment or statefulset", kind))
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid workload name")
+	}
+
+	var body struct {
+		Replicas *int32 `json:"replicas"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
+	}
+	if body.Replicas == nil {
+		return fiber.NewError(http.StatusBadRequest, "replicas is required")
+	}
+	if *body.Replicas < 0 || *body.Replicas > 1000 {
+		return fiber.NewError(http.StatusBadRequest, "replicas must be between 0 and 1000")
+	}
+
+	newCount, err := d.Client.ScaleWorkload(c.Context(), namespace, normalKind, name, *body.Replicas)
+	entry := store.AuditEntry{
+		IP:      c.IP(),
+		Action:  "k8s." + normalKind + ".scale",
+		Target:  namespace + "/" + name,
+		Outcome: "success",
+		Detail:  map[string]any{"replicas": *body.Replicas},
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{"replicas": *body.Replicas, "error": err.Error()}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+		return fiber.NewError(http.StatusInternalServerError, "scale failed: "+err.Error())
+	}
+	_ = d.DB.WriteAudit(c.Context(), entry)
+	return c.JSON(fiber.Map{"ok": true, "replicas": newCount})
+}
+
+func (d Deps) deletePodHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	namespace := c.Params("namespace")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid pod name")
+	}
+
+	force := c.Query("force") == "true"
+	var gracePeriod *int64
+	if g := c.Query("grace"); g != "" {
+		var n int64
+		if _, err := fmt.Sscanf(g, "%d", &n); err != nil || n < 0 || n > 600 {
+			return fiber.NewError(http.StatusBadRequest, "grace must be an integer between 0 and 600")
+		}
+		gracePeriod = &n
+	}
+
+	detail := map[string]any{"force": force}
+	if gracePeriod != nil {
+		detail["grace"] = *gracePeriod
+	}
+
+	err := d.Client.DeletePod(c.Context(), namespace, name, gracePeriod, force)
+	entry := store.AuditEntry{
+		IP:      c.IP(),
+		Action:  "k8s.pod.delete",
+		Target:  namespace + "/" + name,
+		Outcome: "success",
+		Detail:  detail,
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{"force": force, "error": err.Error()}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+		return fiber.NewError(http.StatusInternalServerError, "delete pod failed: "+err.Error())
+	}
+	_ = d.DB.WriteAudit(c.Context(), entry)
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+func (d Deps) cordonNodeHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	name := c.Params("name")
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid node name")
+	}
+
+	var body struct {
+		Cordoned *bool `json:"cordoned"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
+	}
+	if body.Cordoned == nil {
+		return fiber.NewError(http.StatusBadRequest, "cordoned is required")
+	}
+
+	action := "k8s.node.cordon"
+	if !*body.Cordoned {
+		action = "k8s.node.uncordon"
+	}
+
+	err := d.Client.CordonNode(c.Context(), name, *body.Cordoned)
+	entry := store.AuditEntry{
+		IP:      c.IP(),
+		Action:  action,
+		Target:  name,
+		Outcome: "success",
+		Detail:  map[string]any{"cordoned": *body.Cordoned},
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{"cordoned": *body.Cordoned, "error": err.Error()}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+		return fiber.NewError(http.StatusInternalServerError, action+" failed: "+err.Error())
+	}
+	_ = d.DB.WriteAudit(c.Context(), entry)
+	return c.JSON(fiber.Map{"ok": true, "cordoned": *body.Cordoned})
 }
 
 // ---- WebSocket ----

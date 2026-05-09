@@ -1,5 +1,21 @@
-import { useK8sWorkloadDetail } from '@/lib/k8s'
+import { useState } from 'react'
+import { Loader2 } from 'lucide-react'
+
+import { useK8sWorkloadDetail, useRestartWorkload, useScaleWorkload } from '@/lib/k8s'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { ConditionsTable } from './ConditionsTable'
@@ -33,19 +49,64 @@ export function WorkloadDetail({
     open ? name : null
   )
 
+  const restart = useRestartWorkload()
+  const scale = useScaleWorkload()
+
+  const [restartOpen, setRestartOpen] = useState(false)
+  const [scaleOpen, setScaleOpen] = useState(false)
+  const [scaleReplicas, setScaleReplicas] = useState<number>(0)
+
   const w = data?.workload
   const pct = w && w.ready.desired > 0 ? (w.ready.current / w.ready.desired) * 100 : 0
   const healthy = w ? w.ready.current >= w.ready.desired : false
+  const canScale = w?.kind === 'Deployment' || w?.kind === 'StatefulSet'
+
+  function handleScaleOpen() {
+    setScaleReplicas(w?.ready.desired ?? 0)
+    setScaleOpen(true)
+  }
+
+  function handleRestartConfirm() {
+    if (!namespace || !kind || !name) return
+    restart.mutate({ namespace, kind, name }, { onSuccess: () => setRestartOpen(false) })
+  }
+
+  function handleScaleConfirm() {
+    if (!namespace || !kind || !name) return
+    scale.mutate({ namespace, kind, name, replicas: scaleReplicas }, { onSuccess: () => setScaleOpen(false) })
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="font-mono break-all">{w?.name ?? name}</SheetTitle>
-          <SheetDescription>
-            {w ? `${w.kind} · ${w.namespace}` : (kind && namespace ? `${kind} · ${namespace}` : '')}
-          </SheetDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <SheetTitle className="font-mono break-all">{w?.name ?? name}</SheetTitle>
+              <SheetDescription>
+                {w ? `${w.kind} · ${w.namespace}` : (kind && namespace ? `${kind} · ${namespace}` : '')}
+              </SheetDescription>
+            </div>
+            <div className="flex shrink-0 gap-2 pt-0.5">
+              {canScale && (
+                <Button size="sm" variant="outline" onClick={handleScaleOpen}>
+                  Scale
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => setRestartOpen(true)}>
+                Restart
+              </Button>
+            </div>
+          </div>
         </SheetHeader>
+
+        {(restart.isError || scale.isError) && (
+          <Alert variant="destructive" className="mt-3">
+            <AlertDescription>
+              {restart.isError ? (restart.error as Error).message : (scale.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {data && w && (
           <div className="mt-4 flex flex-col gap-6">
@@ -86,6 +147,55 @@ export function WorkloadDetail({
           </div>
         )}
       </SheetContent>
+
+      {/* Restart confirmation */}
+      <AlertDialog open={restartOpen} onOpenChange={setRestartOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restart workload?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Trigger a rollout restart of {kind}/{name}? Pods will be recreated one by one
+              according to the workload&apos;s strategy.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restart.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRestartConfirm} disabled={restart.isPending}>
+              {restart.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Restart
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Scale modal */}
+      <AlertDialog open={scaleOpen} onOpenChange={setScaleOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Scale workload</AlertDialogTitle>
+            <AlertDialogDescription>
+              Set the desired replica count for {kind}/{name}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-1 py-2">
+            <label className="mb-1.5 block text-sm font-medium">Replicas</label>
+            <Input
+              type="number"
+              min={0}
+              max={1000}
+              value={scaleReplicas}
+              onChange={(e) => setScaleReplicas(Number(e.target.value))}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={scale.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleScaleConfirm} disabled={scale.isPending}>
+              {scale.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Apply
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   )
 }

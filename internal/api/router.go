@@ -122,7 +122,7 @@ func NewRouter(d Deps) *fiber.App {
 
 	networkapi.MountHTTP(guarded, networkapi.Deps{DB: d.DB, Logger: d.Logger})
 	logsapi.MountHTTP(guarded, logsapi.Deps{Logger: d.Logger})
-	k8sapi.MountHTTP(guarded, k8sapi.Deps{Client: d.K8s, Logger: d.Logger})
+	k8sapi.MountHTTP(guarded, k8sapi.Deps{Client: d.K8s, DB: d.DB, Logger: d.Logger})
 	settingsapi.MountHTTP(guarded, settingsapi.Deps{Cfg: d.Cfg, DB: d.DB})
 
 	// Catch-all 404 for unknown /api paths.

@@ -7,8 +7,15 @@ metadata:
 ---
 # Phase A: read-only access to core cluster resources.
 # Phase B widens with pods/log so the SPA can stream container output.
-# Phase C will widen further for write actions; do NOT add secrets,
-# persistentvolumes, or any write verb here yet.
+# Phase C widens with the verbs needed for lifecycle actions:
+#   - patch on apps/{deployments,statefulsets,daemonsets} for `rollout restart`
+#     (annotation patch on .spec.template.metadata).
+#   - update on apps/{deployments,statefulsets}/scale subresource.
+#   - delete on pods (controller-driven recreate).
+#   - patch on nodes for cordon/uncordon (.spec.unschedulable).
+# We still do NOT grant access to secrets, persistentvolumes, or destructive
+# verbs on workloads (delete on apps/* would let the operator wipe a workload
+# from the SPA without going through GitOps).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -28,6 +35,14 @@ rules:
     resources:
       - pods/log
     verbs: [get]
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: [delete]
+  - apiGroups: [""]
+    resources:
+      - nodes
+    verbs: [patch]
   - apiGroups: ["apps"]
     resources:
       - deployments
@@ -35,6 +50,17 @@ rules:
       - daemonsets
       - replicasets
     verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+    verbs: [patch]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments/scale
+      - statefulsets/scale
+    verbs: [update]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

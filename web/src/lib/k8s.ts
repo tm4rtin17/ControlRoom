@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiFetch } from './api'
 
@@ -218,6 +218,66 @@ export function useK8sServiceDetail(namespace: string | null, name: string | nul
       ),
     enabled: !!(namespace && name),
     refetchInterval: 10_000,
+  })
+}
+
+export function useRestartWorkload() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ namespace, kind, name }: { namespace: string; kind: string; name: string }) =>
+      apiFetch<{ ok: true; message: string }>(
+        `/api/k8s/workloads/${encodeURIComponent(namespace)}/${encodeURIComponent(kind.toLowerCase())}/${encodeURIComponent(name)}/restart`,
+        { method: 'POST' }
+      ),
+    onSuccess: (_data, { namespace, kind, name }) => {
+      qc.invalidateQueries({ queryKey: ['k8s', 'workloads', namespace, kind, name, 'detail'] })
+      qc.invalidateQueries({ queryKey: ['k8s', 'workloads', namespace] })
+    },
+  })
+}
+
+export function useScaleWorkload() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ namespace, kind, name, replicas }: { namespace: string; kind: string; name: string; replicas: number }) =>
+      apiFetch<{ ok: true; replicas: number }>(
+        `/api/k8s/workloads/${encodeURIComponent(namespace)}/${encodeURIComponent(kind.toLowerCase())}/${encodeURIComponent(name)}/scale`,
+        { method: 'POST', body: JSON.stringify({ replicas }) }
+      ),
+    onSuccess: (_data, { namespace, kind, name }) => {
+      qc.invalidateQueries({ queryKey: ['k8s', 'workloads', namespace, kind, name, 'detail'] })
+      qc.invalidateQueries({ queryKey: ['k8s', 'workloads', namespace] })
+    },
+  })
+}
+
+export function useDeletePod() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ namespace, name, force }: { namespace: string; name: string; force?: boolean }) =>
+      apiFetch<{ ok: true }>(
+        `/api/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}${force ? '?force=true' : ''}`,
+        { method: 'DELETE' }
+      ),
+    onSuccess: (_data, { namespace }) => {
+      qc.invalidateQueries({ queryKey: ['k8s', 'pods', namespace] })
+      qc.invalidateQueries({ queryKey: ['k8s', 'pods'] })
+    },
+  })
+}
+
+export function useCordonNode() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, cordoned }: { name: string; cordoned: boolean }) =>
+      apiFetch<{ ok: true; cordoned: boolean }>(
+        `/api/k8s/nodes/${encodeURIComponent(name)}/cordon`,
+        { method: 'POST', body: JSON.stringify({ cordoned }) }
+      ),
+    onSuccess: (_data, { name }) => {
+      qc.invalidateQueries({ queryKey: ['k8s', 'nodes', name, 'detail'] })
+      qc.invalidateQueries({ queryKey: ['k8s', 'nodes'] })
+    },
   })
 }
 

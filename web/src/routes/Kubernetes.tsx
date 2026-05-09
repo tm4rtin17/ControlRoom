@@ -172,6 +172,7 @@ export function Kubernetes() {
         name={openPod?.name ?? null}
         open={!!openPod}
         onOpenChange={(o) => { if (!o) setOpenPod(null) }}
+        onClose={() => setOpenPod(null)}
       />
       <ServiceDetail
         namespace={openService?.namespace ?? null}

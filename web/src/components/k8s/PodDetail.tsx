@@ -1,7 +1,20 @@
 import { useState } from 'react'
+import { Loader2 } from 'lucide-react'
 
-import { useK8sPodDetail } from '@/lib/k8s'
+import { useK8sPodDetail, useDeletePod } from '@/lib/k8s'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { K8sPodStatusPill } from './K8sStatusPill'
@@ -23,31 +36,67 @@ export function PodDetail({
   name,
   open,
   onOpenChange,
+  onClose,
 }: {
   namespace: string | null
   name: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  onClose?: () => void
 }) {
   const { data } = useK8sPodDetail(open ? namespace : null, open ? name : null)
   const [activeContainer, setActiveContainer] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [force, setForce] = useState(false)
+
+  const deletePod = useDeletePod()
 
   const containers = data?.containers ?? []
-  // Resolve active container: use state if valid, else first container
   const resolvedContainer =
     (activeContainer && containers.find((c) => c.name === activeContainer)?.name) ||
     containers[0]?.name ||
     null
 
+  function handleDeleteConfirm() {
+    if (!namespace || !name) return
+    deletePod.mutate(
+      { namespace, name, force },
+      {
+        onSuccess: () => {
+          setDeleteOpen(false)
+          onClose?.()
+          onOpenChange(false)
+        },
+      }
+    )
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="font-mono break-all">{data?.pod.name ?? name}</SheetTitle>
-          <SheetDescription>
-            {data ? `${data.pod.namespace} · ${data.node_name || '—'} · ${data.pod.pod_ip || '—'} · ${data.qos_class}` : (namespace ?? '')}
-          </SheetDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <SheetTitle className="font-mono break-all">{data?.pod.name ?? name}</SheetTitle>
+              <SheetDescription>
+                {data
+                  ? `${data.pod.namespace} · ${data.node_name || '—'} · ${data.pod.pod_ip || '—'} · ${data.qos_class}`
+                  : (namespace ?? '')}
+              </SheetDescription>
+            </div>
+            <div className="shrink-0 pt-0.5">
+              <Button size="sm" variant="destructive" onClick={() => setDeleteOpen(true)}>
+                Delete pod
+              </Button>
+            </div>
+          </div>
         </SheetHeader>
+
+        {deletePod.isError && (
+          <Alert variant="destructive" className="mt-3">
+            <AlertDescription>{(deletePod.error as Error).message}</AlertDescription>
+          </Alert>
+        )}
 
         {data && (
           <div className="mt-4 flex flex-col gap-6">
@@ -111,7 +160,6 @@ export function PodDetail({
 
             {namespace && name && resolvedContainer && (
               <Section title="Logs">
-                {/* container picker */}
                 {containers.length > 1 && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
                     {containers.map((c) => (
@@ -140,6 +188,36 @@ export function PodDetail({
           </div>
         )}
       </SheetContent>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete pod?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete pod {namespace}/{name}? The controller will recreate it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-1 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="h-4 w-4 rounded border"
+              />
+              Force (skip graceful shutdown)
+            </label>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletePod.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDeleteConfirm} disabled={deletePod.isPending}>
+              {deletePod.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   )
 }
