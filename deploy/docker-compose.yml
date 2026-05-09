@@ -107,4 +107,11 @@ services:
       # CR_TRUST_PROXY: "true"   # set when behind a reverse proxy
 
 volumes:
+  # External so compose reuses the existing host-level volume instead of
+  # creating a project-namespaced one (`deploy_controlroom-data`). Without
+  # this, switching between `docker run -v controlroom-data:/data` and
+  # `docker compose up` silently lands on different volumes — operator's
+  # admin account, JWT key, and TLS material are stranded on the other
+  # volume and the SPA shows the first-run setup wizard.
   controlroom-data:
+    external: true
