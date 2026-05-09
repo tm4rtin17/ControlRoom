@@ -5,15 +5,19 @@ package k8s
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog"
+	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/tm4rtin17/controlroom/internal/api/middleware"
 	"github.com/tm4rtin17/controlroom/internal/k8s"
@@ -34,6 +38,15 @@ const (
 
 	tailDefault = 200
 	tailMax     = 5000
+
+	wsExecWriteWait    = 5 * time.Second
+	wsExecReadWait     = 70 * time.Second
+	wsExecPingInterval = 30 * time.Second
+	wsExecIdleTimeout  = 30 * time.Minute
+	wsExecIdleCheck    = 15 * time.Second
+
+	execCmdMaxLen   = 256
+	execSizeQueueCh = 8
 )
 
 // dns1123RE matches a DNS-1123 subdomain (k8s name and namespace format).
@@ -65,6 +78,7 @@ func MountHTTP(authed fiber.Router, d Deps) {
 func MountWS(wsGroup fiber.Router, d Deps) {
 	g := wsGroup.Group("/k8s")
 	g.Get("/pods/:namespace/:name/logs", websocket.New(d.podLogsWS, websocket.Config{HandshakeTimeout: 5 * time.Second}))
+	g.Get("/pods/:namespace/:name/exec", websocket.New(d.podExecWS, websocket.Config{HandshakeTimeout: 5 * time.Second}))
 }
 
 func (d Deps) requireClient() error {
@@ -531,4 +545,280 @@ func (d Deps) podLogsWS(c *websocket.Conn) {
 			}
 		}
 	}
+}
+
+// ---- pod exec WebSocket ----
+
+// execInitMsg is the first text frame the client must send.
+type execInitMsg struct {
+	Rows      int      `json:"rows"`
+	Cols      int      `json:"cols"`
+	Container string   `json:"container"`
+	Command   []string `json:"command,omitempty"`
+}
+
+// execControlMsg is a subsequent text frame from the client.
+type execControlMsg struct {
+	Type string `json:"type"`
+	Rows int    `json:"rows,omitempty"`
+	Cols int    `json:"cols,omitempty"`
+}
+
+// execErrorFrame is a fatal text frame sent server → client before close.
+type execErrorFrame struct {
+	Type string `json:"type"`
+	Err  string `json:"err"`
+}
+
+// wsSizeQueue implements remotecommand.TerminalSizeQueue via a buffered channel.
+type wsSizeQueue struct {
+	ch chan remotecommand.TerminalSize
+}
+
+func (q *wsSizeQueue) Next() *remotecommand.TerminalSize {
+	s, ok := <-q.ch
+	if !ok {
+		return nil
+	}
+	return &s
+}
+
+// wsWriter serialises binary writes to the WebSocket with a per-write deadline.
+// It is used for both stdout and stderr (merged).
+type wsExecWriter struct {
+	conn     *websocket.Conn
+	bytesOut *atomic.Int64
+}
+
+func (w *wsExecWriter) Write(p []byte) (int, error) {
+	_ = w.conn.SetWriteDeadline(time.Now().Add(wsExecWriteWait))
+	if err := w.conn.WriteMessage(websocket.BinaryMessage, p); err != nil {
+		return 0, err
+	}
+	w.bytesOut.Add(int64(len(p)))
+	return len(p), nil
+}
+
+func clampExecDim(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > 500 {
+		return 500
+	}
+	return n
+}
+
+func (d Deps) podExecWS(c *websocket.Conn) {
+	defer func() { _ = c.Close() }()
+
+	if d.Client == nil {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "kubernetes not available"})
+		return
+	}
+
+	namespace := c.Params("namespace")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "invalid namespace"})
+		return
+	}
+	if !validK8sName(name) {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "invalid pod name"})
+		return
+	}
+
+	_ = c.SetReadDeadline(time.Now().Add(wsExecReadWait))
+	c.SetPongHandler(func(string) error { return c.SetReadDeadline(time.Now().Add(wsExecReadWait)) })
+
+	// Expect text init frame first.
+	mt, raw, err := c.ReadMessage()
+	if err != nil {
+		return
+	}
+	if mt != websocket.TextMessage {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "expected JSON init frame first"})
+		return
+	}
+
+	var init execInitMsg
+	if err := json.Unmarshal(raw, &init); err != nil {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "invalid init frame: " + err.Error()})
+		return
+	}
+
+	// Validate container (required, DNS-1123 label).
+	if init.Container == "" {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "container is required"})
+		return
+	}
+	if !validK8sName(init.Container) {
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "invalid container name"})
+		return
+	}
+
+	// Validate / default command.
+	command := init.Command
+	if len(command) == 0 {
+		command = []string{"/bin/sh"}
+	} else {
+		for i, part := range command {
+			if part == "" {
+				_ = c.WriteJSON(execErrorFrame{Type: "error", Err: fmt.Sprintf("command[%d] is empty", i)})
+				return
+			}
+			if len(part) > execCmdMaxLen {
+				_ = c.WriteJSON(execErrorFrame{Type: "error", Err: fmt.Sprintf("command[%d] exceeds max length", i)})
+				return
+			}
+		}
+	}
+
+	rows := clampExecDim(init.Rows)
+	cols := clampExecDim(init.Cols)
+
+	// Audit user.
+	userID := int64(0)
+	if u, ok := c.Locals(middleware.CtxUser).(*store.User); ok && u != nil {
+		userID = u.ID
+	}
+	startedAt := time.Now()
+
+	_ = d.DB.WriteAudit(context.Background(), store.AuditEntry{
+		UserID:  userID,
+		IP:      c.RemoteAddr().String(),
+		Action:  "k8s.pod.exec.start",
+		Target:  namespace + "/" + name,
+		Outcome: "success",
+		Detail:  map[string]any{"container": init.Container, "command": command},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Byte counters.
+	var bytesIn, bytesOut atomic.Int64
+
+	// Stdin pipe: WS read loop → stdinW → SPDY.
+	stdinR, stdinW := io.Pipe()
+
+	// Size queue.
+	sq := &wsSizeQueue{ch: make(chan remotecommand.TerminalSize, execSizeQueueCh)}
+	// Seed with initial size.
+	sq.ch <- remotecommand.TerminalSize{Width: uint16(cols), Height: uint16(rows)}
+
+	// stdout/stderr writer.
+	writer := &wsExecWriter{conn: c, bytesOut: &bytesOut}
+
+	// Launch SPDY exec in background.
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- d.Client.PodExec(ctx, namespace, name, init.Container, command, stdinR, writer, writer, sq)
+		_ = stdinR.Close()
+	}()
+
+	// Activity tracker for idle timeout.
+	lastActivity := time.Now()
+	activityCh := make(chan struct{}, 1)
+	bumpActivity := func() {
+		lastActivity = time.Now()
+		select {
+		case activityCh <- struct{}{}:
+		default:
+		}
+	}
+
+	// Idle / ping goroutine.
+	stopIdle := make(chan struct{})
+	go func() {
+		defer close(stopIdle)
+		ticker := time.NewTicker(wsExecIdleCheck)
+		ping := time.NewTicker(wsExecPingInterval)
+		defer ticker.Stop()
+		defer ping.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-activityCh:
+				continue
+			case <-ping.C:
+				_ = c.SetWriteDeadline(time.Now().Add(wsExecWriteWait))
+				if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
+					cancel()
+					return
+				}
+			case <-ticker.C:
+				if time.Since(lastActivity) > wsExecIdleTimeout {
+					_ = c.SetWriteDeadline(time.Now().Add(wsExecWriteWait))
+					_ = c.WriteJSON(execErrorFrame{Type: "error", Err: "idle timeout"})
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	// WS read loop: binary → stdin, text → resize.
+	var readLoopErr error
+	for {
+		mt, data, err := c.ReadMessage()
+		if err != nil {
+			readLoopErr = err
+			break
+		}
+		bumpActivity()
+		switch mt {
+		case websocket.BinaryMessage:
+			bytesIn.Add(int64(len(data)))
+			if _, err := stdinW.Write(data); err != nil {
+				goto done
+			}
+		case websocket.TextMessage:
+			var ctrl execControlMsg
+			if jsonErr := json.Unmarshal(data, &ctrl); jsonErr != nil {
+				continue
+			}
+			if ctrl.Type == "resize" {
+				r := clampExecDim(ctrl.Rows)
+				col := clampExecDim(ctrl.Cols)
+				select {
+				case sq.ch <- remotecommand.TerminalSize{Width: uint16(col), Height: uint16(r)}:
+				default:
+				}
+			}
+		}
+	}
+done:
+	// Cancel context and close stdin pipe so SPDY and size queue both unblock.
+	cancel()
+	_ = stdinW.Close()
+	close(sq.ch)
+
+	// Wait for exec to finish; capture any error to decide if we send an error frame.
+	execErr := <-execDone
+
+	<-stopIdle
+
+	// Only send an error frame if exec failed (not a normal shell exit) and the
+	// read loop didn't already detect a closed WS.
+	if execErr != nil && readLoopErr == nil {
+		_ = c.SetWriteDeadline(time.Now().Add(wsExecWriteWait))
+		_ = c.WriteJSON(execErrorFrame{Type: "error", Err: execErr.Error()})
+	}
+
+	_ = d.DB.WriteAudit(context.Background(), store.AuditEntry{
+		UserID:  userID,
+		IP:      c.RemoteAddr().String(),
+		Action:  "k8s.pod.exec.end",
+		Target:  namespace + "/" + name,
+		Outcome: "success",
+		Detail: map[string]any{
+			"container":   init.Container,
+			"command":     command,
+			"duration_ms": time.Since(startedAt).Milliseconds(),
+			"bytes_in":    bytesIn.Load(),
+			"bytes_out":   bytesOut.Load(),
+		},
+	})
 }

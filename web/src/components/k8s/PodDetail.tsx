@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Terminal as TerminalIcon } from 'lucide-react'
 
 import { useK8sPodDetail, useDeletePod } from '@/lib/k8s'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { PodExecModal } from './PodExecModal'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -46,6 +47,7 @@ export function PodDetail({
 }) {
   const { data } = useK8sPodDetail(open ? namespace : null, open ? name : null)
   const [activeContainer, setActiveContainer] = useState<string | null>(null)
+  const [execContainer, setExecContainer] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [force, setForce] = useState(false)
 
@@ -114,6 +116,7 @@ export function PodDetail({
                       <th className="py-1.5 pr-3 font-medium">Ready</th>
                       <th className="py-1.5 pr-3 font-medium">Restarts</th>
                       <th className="py-1.5 pr-3 font-medium">State</th>
+                      <th className="py-1.5 font-medium" />
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -142,6 +145,16 @@ export function PodDetail({
                           <Badge variant={c.state === 'running' ? 'success' : c.state === 'terminated' ? 'muted' : 'warn'}>
                             {c.state}
                           </Badge>
+                        </td>
+                        <td className="py-1.5">
+                          <button
+                            title="Open shell"
+                            onClick={(e) => { e.stopPropagation(); setExecContainer(c.name) }}
+                            className="rounded p-1 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                          >
+                            <TerminalIcon className="h-3.5 w-3.5" aria-hidden />
+                            <span className="sr-only">Exec into {c.name}</span>
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -188,6 +201,17 @@ export function PodDetail({
           </div>
         )}
       </SheetContent>
+
+      {/* Pod exec shell */}
+      {namespace && name && execContainer && (
+        <PodExecModal
+          namespace={namespace}
+          podName={name}
+          containers={containers}
+          initialContainer={execContainer}
+          onClose={() => setExecContainer(null)}
+        />
+      )}
 
       {/* Delete confirmation */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>

@@ -22,10 +22,12 @@ import (
 // ErrUnavailable mirrors the docker package sentinel; handlers return 503.
 var ErrUnavailable = errors.New("kubernetes is not available")
 
-// Client holds a typed clientset and a dynamic client.
+// Client holds a typed clientset, a dynamic client, and the REST config
+// needed by remotecommand.NewSPDYExecutor for pod exec streams.
 type Client struct {
 	cs  *kubernetes.Clientset
 	dyn dynamic.Interface
+	cfg *rest.Config
 }
 
 // New constructs a Client. It never returns a non-nil Client alongside a
@@ -43,7 +45,7 @@ func New(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrUnavailable, err.Error())
 	}
-	c := &Client{cs: cs, dyn: dyn}
+	c := &Client{cs: cs, dyn: dyn, cfg: cfg}
 	if err := c.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrUnavailable, err.Error())
 	}

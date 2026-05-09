@@ -285,3 +285,8 @@ export function podLogsURL(namespace: string, name: string, container: string): 
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}/ws/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?container=${encodeURIComponent(container)}&tail=200`
 }
+
+export function podExecURL(namespace: string, name: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}/ws/k8s/pods/${namespace}/${name}/exec`
+}

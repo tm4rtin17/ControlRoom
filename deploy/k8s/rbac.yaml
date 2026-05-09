@@ -37,6 +37,10 @@ rules:
     verbs: [get]
   - apiGroups: [""]
     resources:
+      - pods/exec
+    verbs: [create]
+  - apiGroups: [""]
+    resources:
       - pods
     verbs: [delete]
   - apiGroups: [""]
