@@ -151,6 +151,13 @@ If you want the Kubernetes tab to work in this shape, you also need:
 git clone https://github.com/tm4rtin17/ControlRoom.git
 cd ControlRoom
 
+# One-time: create the persistent data volume. The compose file declares
+# `controlroom-data` as `external: true` so docker compose reuses this
+# named volume instead of creating a project-namespaced one
+# (`deploy_controlroom-data`) — admin account, JWT key, and TLS material
+# would be stranded if the names diverged.
+docker volume create controlroom-data
+
 # Set DOCKER_GID for the compose file (only needed if you don't use
 # network_mode:host or run as root — the default compose runs as root and
 # doesn't need group_add, but it's still pulled from this var).
@@ -292,25 +299,33 @@ No kubeconfig is needed.
 
 ### What the ClusterRole grants
 
-Phase A + B — strictly read-only. See `deploy/k8s/rbac.yaml` for the
-canonical list:
+The `controlroom-reader` ClusterRole was widened across Phases A → D as
+features landed. The current canonical version lives in
+`deploy/k8s/rbac.yaml`. Summary:
 
-```yaml
-rules:
-  - apiGroups: [""]
-    resources: [nodes, namespaces, pods, services, configmaps, events, endpoints]
-    verbs: [get, list, watch]
-  - apiGroups: [""]
-    resources: [pods/log]
-    verbs: [get]
-  - apiGroups: ["apps"]
-    resources: [deployments, statefulsets, daemonsets, replicasets]
-    verbs: [get, list, watch]
-```
+| Resource | Verbs | Phase | Used for |
+|---|---|---|---|
+| `nodes` / `namespaces` / `pods` / `services` / `configmaps` / `events` / `endpoints` | `get,list,watch` | A | List + detail views |
+| `apps/deployments` / `statefulsets` / `daemonsets` / `replicasets` | `get,list,watch` | A | Workload lists + detail |
+| `pods/log` | `get` | B | Pod log streaming |
+| `pods/exec` | `create` | D1 | Pod exec / shell-in-browser |
+| `pods` | `delete` | C | Delete pod (controller-recreate) |
+| `nodes` | `patch` | C | Cordon / uncordon |
+| `apps/deployments` / `statefulsets` / `daemonsets` | `patch,update` | C + D4 | Restart annotation + full YAML edit |
+| `apps/deployments/scale` / `statefulsets/scale` | `update` | C | Scale |
+| `services` / `configmaps` | `update` | D2 + D4 | ConfigMap edit + manifest YAML edit |
+| `secrets` | `get,list` (NOT `watch`) | D3 | Read-only viewer; intentionally narrow |
 
-No `secrets`, no `persistentvolumes`, no write verbs. Phase C will widen
-this to include `patch` and `delete` on Deployments / Pods for lifecycle
-actions.
+**Explicitly excluded**: `secrets/watch` (would establish a long-lived
+stream of all cluster secrets — point-in-time reads + audit are
+preferred); `delete` on workloads (would let the SPA wipe a Deployment
+outside GitOps); `persistentvolumes` (cluster-scoped, dangerous);
+`create` on most resources (Phase D4 is edit-only — no create-from-
+nothing path).
+
+Every secret detail GET writes a `k8s.secret.read` audit row; every
+manifest apply writes a `k8s.manifest.apply` (or `…dry_run`) row. The
+audit table records *that* a secret was read, not what was in it.
 
 ### Accessing the SPA
 

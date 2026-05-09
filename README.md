@@ -15,7 +15,7 @@ to replace routine SSH for the things you do over and over.
 | **Updates** | `apt list --upgradable`, one-click check/apply with live job streaming, reboot-required banner. | `apt`, `sudo`, `systemctl` |
 | **Services** | List / start / stop / restart / enable / disable systemd units; live `journalctl -fu` log tail. | dbus |
 | **Containers** | Docker (and Podman socket-compatible) list with Compose-project grouping; per-container live logs + CPU/MEM stats; lifecycle actions. | `/var/run/docker.sock` |
-| **Kubernetes** | Read-only cluster view: nodes, namespaces, workloads (Deployment / StatefulSet / DaemonSet), pods, services. Per-resource detail drawer with conditions + events. Live pod log streaming. *(Phase A + B; lifecycle actions in Phase C)* | client-go |
+| **Kubernetes** | Cluster management — list / detail / events for nodes, namespaces, workloads (Deployment/StatefulSet/DaemonSet), pods, services, configmaps, secrets. Pod log streaming. Pod **exec** in the browser (xterm.js + SPDY). Lifecycle actions: restart workload, scale, delete pod, cordon/uncordon node. ConfigMap structured key/value editor. Secret read-only viewer (masked-by-default, audited). Monaco-based **YAML editor** with server-side dry-run + conflict detection. | client-go |
 | **Terminal** | Full PTY in the browser via xterm.js. Either a local shell or — in container deployments — a real host shell after PAM login. | `/dev/pty`, `nsenter`, `su` |
 | **Network** | Read-only interfaces + UFW rules editor (add / delete / enable / disable). | `ip -j`, `ufw`, `sudo` |
 | **Logs** | journald browser with unit / priority / since / search filters and live tail. Falls back to streaming docker container logs when journald isn't reachable. | `journalctl`, `/var/run/docker.sock` |
@@ -118,6 +118,7 @@ docs/
 - [`docs/INSTALL.md`](./docs/INSTALL.md) — detailed install for all three shapes.
 - [`docs/CONFIG.md`](./docs/CONFIG.md) — every environment variable + which tabs need what.
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model and what's actually enforced.
+- [`CHANGELOG.md`](./CHANGELOG.md) — release-by-release feature + fix log.
 - [`SPEC.md`](./SPEC.md) — design spec.
 - [`MILESTONES.md`](./MILESTONES.md) — what shipped when.
 

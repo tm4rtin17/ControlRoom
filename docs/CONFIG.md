@@ -72,6 +72,11 @@ What each tab needs to function, by deployment shape.
 | **Services** | dbus + `systemctl` | ✅ via dbus session | ✅ `/var/run/dbus/system_bus_socket` mounted | ❌ |
 | **Containers** | `/var/run/docker.sock` | ✅ if controlroom user is in `docker` group | ✅ socket mounted ro | ❌ |
 | **Kubernetes** | client-go with kubeconfig or in-cluster SA | ✅ if `kubectl` works as the controlroom user | ✅ `/etc/rancher/k3s/k3s.yaml` mounted | ✅ in-cluster ServiceAccount |
+| ↳ Pod **exec** | client-go remotecommand (SPDY) | ✅ | ✅ | ✅ requires `pods/exec: create` in ClusterRole |
+| ↳ Lifecycle actions | dynamic-client patch / scale / delete / node-patch | ✅ | ✅ | ✅ requires `patch`/`update`/`delete` per resource |
+| ↳ ConfigMap edit | dynamic-client update | ✅ | ✅ | ✅ requires `configmaps: update` |
+| ↳ Secret view (read-only) | typed-client get/list, base64 decoded server-side | ✅ | ✅ | ✅ requires `secrets: get,list` |
+| ↳ Manifest YAML edit | dynamic-client update with DryRunAll option | ✅ | ✅ | ✅ requires `update` on the editable kind |
 | **Terminal** | PTY + (optional) `nsenter`+`su` | ✅ shell as controlroom user | ✅ host shell via nsenter+PAM login | ❌ |
 | **Network** | `ip -j addr show`, `sudo ufw …` | ✅ via sudoers | ✅ via `network_mode: host` + NET_ADMIN | ❌ shows Pod's network ns only |
 | **Logs** | `journalctl` + (fallback) docker logs | ✅ via `adm` group | ✅ `/run/log/journal` + `/etc/machine-id` mounted | ❌ host journal not reachable |

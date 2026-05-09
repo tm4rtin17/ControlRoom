@@ -139,34 +139,49 @@ The Pod runs as:
   `/data` is the only writable mount, via the PVC).
 - `capabilities: { drop: [ALL] }`.
 
-Cluster permissions are scoped via the `controlroom-reader` `ClusterRole`:
+Cluster permissions are scoped via the `controlroom-reader` `ClusterRole`.
+The role grew in tightly-scoped steps as Phases A → D landed; the current
+shape is in `deploy/k8s/rbac.yaml`. Headline:
 
-```yaml
-rules:
-  - apiGroups: [""]
-    resources: [nodes, namespaces, pods, services, configmaps, events, endpoints]
-    verbs: [get, list, watch]
-  - apiGroups: [""]
-    resources: [pods/log]
-    verbs: [get]
-  - apiGroups: ["apps"]
-    resources: [deployments, statefulsets, daemonsets, replicasets]
-    verbs: [get, list, watch]
-```
+| Resource | Verbs | Why |
+|---|---|---|
+| `nodes`/`namespaces`/`pods`/`services`/`configmaps`/`events`/`endpoints` | `get,list,watch` | Read views (Phase A) |
+| `apps/deployments`/`statefulsets`/`daemonsets`/`replicasets` | `get,list,watch` | Workload reads (A) |
+| `pods/log` | `get` | Pod log streaming (B) |
+| `pods/exec` | `create` | Browser exec (D1) |
+| `pods` | `delete` | Pod rotate (C) |
+| `nodes` | `patch` | Cordon/uncordon (C) |
+| `apps/deployments`/`statefulsets`/`daemonsets` | `patch,update` | Restart annotation + YAML edit (C + D4) |
+| `apps/deployments/scale`/`statefulsets/scale` | `update` | Scale (C) |
+| `services`/`configmaps` | `update` | Edit (D2 + D4) |
+| `secrets` | `get,list` only | Read-only viewer (D3) |
 
-**Explicitly excluded** from Phase A/B: `secrets`, `persistentvolumes`,
-`persistentvolumeclaims` (cluster-scoped), and **all write verbs**. Phase
-C will widen this to `patch`/`delete` on Deployments and Pods for
-lifecycle actions; it will not add `secrets` access without a separate
-opt-in.
+**Explicitly excluded** at every phase boundary:
+- `secrets/watch` — would keep a long-lived stream of every cluster
+  secret value open. Point-in-time reads + per-read audit (see below)
+  are the trade.
+- `delete` on `apps/*` — would let the SPA wipe a Deployment / STS / DS
+  outside whatever GitOps tooling owns it.
+- `persistentvolumes` (cluster-scoped) and `persistentvolumeclaims`.
+- `create` on most resources — Phase D4's manifest editor is
+  edit-existing-only; there's no create-from-nothing path.
+
+**Per-read audit** for sensitive resources:
+- `k8s.secret.read` on every Secret detail GET (success or failure),
+  detail = `{"key_count": N}` only — never key names or values.
+- `k8s.manifest.apply` / `k8s.manifest.dry_run` on every YAML edit, with
+  `bytes` of the edited YAML but never the body itself.
 
 **Compromise impact**: an attacker who pwns the controlroom binary in
-this shape can read everything the ClusterRole grants — that's the cluster
-inventory, pod logs, and configmaps. They cannot mutate the cluster, read
-secrets, escape the Pod, or reach the host.
+this shape can read everything the ClusterRole grants (cluster inventory,
+pod logs, configmaps, secret values), and can mutate the limited write
+surface (rollout restart, scale, delete pod, cordon, configmap update,
+manifest YAML update on the 5 editable kinds). They **cannot** create
+new resources, delete workloads, watch secrets, escape the Pod, or
+reach the host. The audit log records who did what to which target.
 
-This is the lowest-risk shape but doesn't give you the host integrations
-(no Services / Updates / Network / Logs / host Terminal).
+This is still the lowest-risk shape vs. the fat-privileged container,
+just no longer "read-only" after Phase D.
 
 ## Audit
 
@@ -233,14 +248,23 @@ These are documented and tracked, not silently missing:
 - **Audit log retention/rotation**: grows unbounded today.
 - **HSTS / CSP headers**: planned for the next polish pass.
 - **Netplan editing**: read-only interfaces today.
-- **K8s lifecycle actions** (Phase C of the Kubernetes tab): scale,
-  restart, delete, cordon. Read-only through Phase A + B.
-- **K8s exec / manifest edit** (Phase D): kubectl-exec into pods, Monaco
-  editor for manifest YAML, ConfigMap and Secret editors. Separate auth
-  story to design.
 - **TLS-via-cert-manager** in the in-cluster shape: the default
   `deploy/k8s/ingress.yaml` leaves TLS as a TODO comment for the
   operator's chosen ClusterIssuer.
+- **RBAC user roles**: `users.role` is stored but not enforced — every
+  authenticated user has admin authority across all tabs. Real
+  multi-user RBAC is a v0.3 item.
+- **Multi-cluster Kubernetes**: the K8s tab targets exactly one cluster
+  (whatever the in-cluster SA reaches or the kubeconfig's first context
+  points at). No context switcher.
+
+Closed in v0.2 (these were gaps in v0.1):
+- **K8s tab**: Phases A–D shipped — read-only inventory, detail drawers,
+  pod log streaming, pod exec, lifecycle actions (restart / scale / delete /
+  cordon), ConfigMap and Secret viewers, Monaco YAML editor.
+- **Public-bind detection**: now treats Tailscale CGNAT (100.64.0.0/10)
+  as private so admins reaching ControlRoom over Tailscale don't see a
+  misleading warning.
 
 ## Reporting
 
