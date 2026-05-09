@@ -164,7 +164,7 @@ function SidebarFooter() {
       </div>
       <div className="mt-3 flex items-center justify-between gap-2">
         <ThemeToggle />
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">v0.1</span>
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">v0.2.0</span>
       </div>
     </div>
   )
