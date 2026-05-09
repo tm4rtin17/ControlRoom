@@ -82,12 +82,18 @@ type Options struct {
 	LoginMode bool
 }
 
-// LoginPath is the host's login(1) binary. /bin/login is universal on
-// Debian/RPi/Ubuntu and on usrmerge-style Fedora/Arch. Resolved from the
-// host's mount namespace at exec time, so a stat from the container
-// against this path would be misleading — we rely on exec failing with a
-// clear error if the host is missing it.
-const LoginPath = "/bin/login"
+// loginScript is what we hand bash via -c when LoginMode is enabled. We
+// don't use util-linux login(1) directly: its modern incarnation refuses
+// to run interactively when execv'd from a regular process (it expects to
+// be slave to getty/sshd, with specific TTY ioctls, and exits silently
+// otherwise). su -l is a regular interactive program that handles PAM
+// password prompts natively, which is exactly the UX we want.
+const loginScript = `
+printf '\nControlRoom Terminal — host login at %s\n' "$(hostname)"
+read -rp 'username: ' CR_USER
+[ -z "$CR_USER" ] && { echo 'no username — disconnecting'; exit 1; }
+exec su -l "$CR_USER"
+`
 
 // New starts a shell under a fresh PTY. The returned Session is hot — the
 // caller must Close() it eventually or the child leaks.
@@ -111,10 +117,10 @@ func New(id string, opts Options) (*Session, error) {
 	var cmd *exec.Cmd
 	switch {
 	case opts.HostShell && opts.LoginMode:
-		// Enter all host namespaces, then exec login(1). PAM prompts the user
-		// for host credentials directly in the xterm; on success login execs
+		// Enter all host namespaces, then prompt for username + run su -l.
+		// PAM authenticates via the host's /etc/pam.d/su; on success su execs
 		// the user's shell at the user's uid. The password never touches Go.
-		cmd = exec.Command(NsenterPath, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", LoginPath)
+		cmd = exec.Command(NsenterPath, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "/bin/bash", "-c", loginScript)
 	case opts.HostShell:
 		// Enter all host namespaces (mount, uts, ipc, net, pid) via PID 1 so
 		// the operator gets a full host shell, not the container's view.
