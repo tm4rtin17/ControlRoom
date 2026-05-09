@@ -45,7 +45,7 @@ func Status(ctx context.Context) (*UFWStatus, error) {
 var numberedRE = regexp.MustCompile(`^\[\s*(\d+)\]\s+(.+?)\s{2,}([A-Z][A-Z ]+?)\s{2,}(.+?)\s*$`)
 
 func parseUFWStatus(out []byte) *UFWStatus {
-	st := &UFWStatus{}
+	st := &UFWStatus{Rules: []UFWRule{}}
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		line := sc.Text()

@@ -67,13 +67,18 @@ func List(ctx context.Context) ([]Interface, error) {
 
 	out2 := make([]Interface, 0, len(raws))
 	for _, r := range raws {
+		flags := r.Flags
+		if flags == nil {
+			flags = []string{}
+		}
 		ifc := Interface{
 			Name:  r.IfName,
 			MAC:   r.Address,
 			State: r.Operstate,
 			MTU:   r.MTU,
 			Type:  r.LinkType,
-			Flags: r.Flags,
+			Flags: flags,
+			IPs:   []string{},
 		}
 		for _, a := range r.AddrInfo {
 			if a.Local == "" {
