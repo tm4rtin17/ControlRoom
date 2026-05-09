@@ -3,9 +3,8 @@
 A modern, single-binary admin UI for headless Linux homelab servers — designed
 to replace routine SSH for the things you do over and over.
 
-> **Status:** v0.2 in development on the [`v0.2`](https://github.com/tm4rtin17/ControlRoom/tree/v0.2) branch.
-> v0.1 (tag `v0.1.0`) is the last fully-released cut. See [`MILESTONES.md`](./MILESTONES.md)
-> for what's done and the roadmap.
+> **Status:** v0.2 is merged and live on `main`. See [`CHANGELOG.md`](./CHANGELOG.md)
+> for what shipped and [`MILESTONES.md`](./MILESTONES.md) for the roadmap.
 
 ## Features
 
