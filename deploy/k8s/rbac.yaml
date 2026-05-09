@@ -47,6 +47,10 @@ rules:
     resources:
       - nodes
     verbs: [patch]
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: [update]
   - apiGroups: ["apps"]
     resources:
       - deployments

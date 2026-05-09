@@ -124,6 +124,22 @@ export interface K8sService {
   age: string
 }
 
+export interface K8sConfigMap {
+  name: string
+  namespace: string
+  keys: string[]
+  age: string
+}
+
+export interface K8sConfigMapDetail {
+  configmap: K8sConfigMap
+  labels: Record<string, string>
+  annotations: Record<string, string>
+  data: Record<string, string>
+  binary_keys: string[]
+  events: K8sEvent[]
+}
+
 export function useK8sNodes() {
   return useQuery({
     queryKey: ['k8s', 'nodes'],
@@ -218,6 +234,45 @@ export function useK8sServiceDetail(namespace: string | null, name: string | nul
       ),
     enabled: !!(namespace && name),
     refetchInterval: 10_000,
+  })
+}
+
+export function useK8sConfigMaps(namespace: string) {
+  return useQuery({
+    queryKey: ['k8s', 'configmaps', namespace],
+    queryFn: () =>
+      apiFetch<{ configmaps: K8sConfigMap[] }>(
+        `/api/k8s/configmaps${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`
+      ),
+    refetchInterval: 10_000,
+    staleTime: 2_000,
+  })
+}
+
+export function useK8sConfigMapDetail(namespace: string | null, name: string | null) {
+  return useQuery({
+    queryKey: ['k8s', 'configmap', 'detail', namespace, name],
+    queryFn: () =>
+      apiFetch<K8sConfigMapDetail>(
+        `/api/k8s/configmaps/${encodeURIComponent(namespace!)}/${encodeURIComponent(name!)}`
+      ),
+    enabled: !!(namespace && name),
+    refetchInterval: 10_000,
+  })
+}
+
+export function useUpdateConfigMap() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ namespace, name, data }: { namespace: string; name: string; data: Record<string, string> }) =>
+      apiFetch<{ ok: true }>(
+        `/api/k8s/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+        { method: 'PUT', body: JSON.stringify({ data }) }
+      ),
+    onSuccess: (_data, { namespace, name }) => {
+      qc.invalidateQueries({ queryKey: ['k8s', 'configmaps', namespace] })
+      qc.invalidateQueries({ queryKey: ['k8s', 'configmap', 'detail', namespace, name] })
+    },
   })
 }
 

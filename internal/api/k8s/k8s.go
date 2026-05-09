@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/tm4rtin17/controlroom/internal/api/middleware"
@@ -72,6 +73,9 @@ func MountHTTP(authed fiber.Router, d Deps) {
 	g.Delete("/pods/:namespace/:name", d.deletePodHandler)
 	g.Get("/services", d.servicesHandler)
 	g.Get("/services/:namespace/:name", d.serviceDetailHandler)
+	g.Get("/configmaps", d.listConfigMapsHandler)
+	g.Get("/configmaps/:namespace/:name", d.configMapDetailHandler)
+	g.Put("/configmaps/:namespace/:name", d.updateConfigMapHandler)
 }
 
 // MountWS registers WebSocket routes on the ws group.
@@ -246,6 +250,117 @@ func (d Deps) serviceDetailHandler(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusInternalServerError, "get service: "+err.Error())
 	}
 	return c.JSON(detail)
+}
+
+// ---- configmap handlers ----
+
+const cmSizeLimit = 1 << 20 // 1 MiB
+
+type configMapsResp struct {
+	ConfigMaps []k8s.ConfigMap `json:"configmaps"`
+}
+
+func (d Deps) listConfigMapsHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	cms, err := d.Client.ListConfigMaps(c.Context(), c.Query("namespace"))
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, "list configmaps: "+err.Error())
+	}
+	return c.JSON(configMapsResp{ConfigMaps: cms})
+}
+
+func (d Deps) configMapDetailHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	namespace := c.Params("namespace")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid configmap name")
+	}
+	detail, err := d.Client.GetConfigMap(c.Context(), namespace, name)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return fiber.NewError(http.StatusNotFound, "configmap not found")
+		}
+		if k8serrors.IsForbidden(err) {
+			return fiber.NewError(http.StatusForbidden, "forbidden")
+		}
+		return fiber.NewError(http.StatusInternalServerError, "get configmap: "+err.Error())
+	}
+	return c.JSON(detail)
+}
+
+type updateConfigMapReq struct {
+	Data map[string]string `json:"data"`
+}
+
+func (d Deps) updateConfigMapHandler(c *fiber.Ctx) error {
+	if err := d.requireClient(); err != nil {
+		return err
+	}
+	namespace := c.Params("namespace")
+	name := c.Params("name")
+	if !validK8sName(namespace) {
+		return fiber.NewError(http.StatusBadRequest, "invalid namespace")
+	}
+	if !validK8sName(name) {
+		return fiber.NewError(http.StatusBadRequest, "invalid configmap name")
+	}
+
+	var body updateConfigMapReq
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
+	}
+	if body.Data == nil {
+		return fiber.NewError(http.StatusBadRequest, "data is required")
+	}
+
+	// Validate each key and compute total size.
+	var totalSize int
+	for k, v := range body.Data {
+		if !k8s.ValidConfigMapKey(k) {
+			return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid configmap key %q: must match ^[a-zA-Z0-9._-]+$", k))
+		}
+		totalSize += len(k) + len(v)
+	}
+	if totalSize > cmSizeLimit {
+		return fiber.NewError(http.StatusRequestEntityTooLarge, fmt.Sprintf("data size %d bytes exceeds 1 MiB limit", totalSize))
+	}
+
+	err := d.Client.UpdateConfigMap(c.Context(), namespace, name, body.Data)
+	entry := store.AuditEntry{
+		IP:      c.IP(),
+		Action:  "k8s.configmap.update",
+		Target:  namespace + "/" + name,
+		Outcome: "success",
+		Detail:  map[string]any{"key_count": len(body.Data), "size_bytes": totalSize},
+	}
+	if u := middleware.CurrentUser(c); u != nil {
+		entry.UserID = u.ID
+	}
+	if err != nil {
+		entry.Outcome = "failure"
+		entry.Detail = map[string]any{"key_count": len(body.Data), "size_bytes": totalSize, "error": err.Error()}
+		_ = d.DB.WriteAudit(c.Context(), entry)
+		if k8serrors.IsNotFound(err) {
+			return fiber.NewError(http.StatusNotFound, "configmap not found")
+		}
+		if k8serrors.IsForbidden(err) {
+			return fiber.NewError(http.StatusForbidden, "forbidden")
+		}
+		if k8serrors.IsConflict(err) {
+			return fiber.NewError(http.StatusConflict, "configmap was modified by another process; please reload and retry")
+		}
+		return fiber.NewError(http.StatusInternalServerError, "update configmap: "+err.Error())
+	}
+	_ = d.DB.WriteAudit(c.Context(), entry)
+	return c.JSON(fiber.Map{"ok": true})
 }
 
 // ---- write action handlers ----
