@@ -53,7 +53,7 @@ COPY go.mod go.sum* ./
 RUN go mod download
 
 COPY . .
-COPY --from=web-builder /src/internal/web/dist ./internal/web/dist
+COPY --from=web-builder /src/web/dist ./internal/web/dist
 
 # Pre-create the data dir so we can COPY it into the runtime stage.
 RUN mkdir -p /out/data
